@@ -1,0 +1,18 @@
+version = "1.0"
+default_provider = "minimax"
+default_model = "minimax-coding-plan/MiniMax-M2.5"
+api_key = "YOUR_MINIMAX_API_KEY_HERE"
+
+[gateway]
+host = "127.0.0.1"
+port = 3000
+
+[agent]
+max_tool_iterations = 100
+max_history_messages = 50
+temperature = 0.7
+
+[security]
+workspace_only = true
+allowed_roots = []
+allowed_commands = []

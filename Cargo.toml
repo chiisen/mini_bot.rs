@@ -1,0 +1,57 @@
+[package]
+name = "mini_bot.rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["MiniBot Team"]
+license = "MIT OR Apache-2.0"
+description = "MiniBot MVP - A minimal Rust AI Agent runtime"
+
+rust-version = "1.87"
+
+[dependencies]
+
+# CLI - clap
+clap = { version = "4.5", features = ["derive"] }
+
+# Async runtime - tokio
+tokio = { version = "1.42", default-features = false, features = ["rt-multi-thread", "macros", "time", "net", "io-util", "sync", "process", "io-std", "fs", "signal"] }
+
+# HTTP client - reqwest
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+
+# Serialization
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+
+# Config management
+directories = "6.0"
+toml = "1.0"
+
+# Logging
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi", "env-filter", "chrono"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Memory/persistence - SQLite
+rusqlite = { version = "0.37", features = ["bundled"] }
+
+# HTTP server - axum
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "ws", "macros"] }
+tower = { version = "0.5", default-features = false }
+tower-http = { version = "0.6", default-features = false, features = ["limit", "timeout"] }
+http-body-util = "0.1"
+
+# Other utilities
+uuid = { version = "1.11", default-features = false, features = ["v4", "std"] }
+async-trait = "0.1"
+parking_lot = "0.12"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
