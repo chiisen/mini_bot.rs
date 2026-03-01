@@ -1,10 +1,14 @@
 [package]
-name = "mini_bot.rs"
+name = "mini_bot_rs"
 version = "0.1.0"
 edition = "2021"
 authors = ["MiniBot Team"]
 license = "MIT OR Apache-2.0"
 description = "MiniBot MVP - A minimal Rust AI Agent runtime"
+
+[lib]
+name = "mini_bot_rs"
+path = "src/lib.rs"
 
 rust-version = "1.87"
 
