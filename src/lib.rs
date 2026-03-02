@@ -6,5 +6,6 @@ pub mod agent;
 pub mod providers;
 pub mod tools;
 pub mod memory;
+pub mod gateway;
 
 pub use config::Config;

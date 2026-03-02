@@ -1,4 +1,4 @@
-# MiniBot
+# MiniBot.rs
 
 一個用 **100% Rust** 實作的高效能 AI Agent 執行框架。
 

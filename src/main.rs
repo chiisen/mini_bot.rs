@@ -1,5 +1,6 @@
 mod agent;
 mod config;
+mod gateway;
 mod memory;
 mod providers;
 mod tools;
@@ -58,7 +59,7 @@ async fn main() -> Result<()> {
             let port = port.unwrap_or(3000);
             let host = host.unwrap_or_else(|| "127.0.0.1".to_string());
             info!("Starting Gateway at {}:{}", host, port);
-            info!("Gateway not implemented yet");
+            gateway::run(&host, port).await?;
         }
         Commands::Version => {
             println!("MiniBot MVP v{}", env!("CARGO_PKG_VERSION"));
