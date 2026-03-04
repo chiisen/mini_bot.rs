@@ -20,10 +20,7 @@ impl FileTool {
 
     #[allow(dead_code)]
     pub fn with_directory(dir: String) -> Self {
-        Self {
-            allowed_directory: Some(dir),
-            max_file_size: MAX_FILE_SIZE,
-        }
+        Self::with_config(Some(dir), MAX_FILE_SIZE)
     }
 
     pub fn with_config(dir: Option<String>, max_size: u64) -> Self {
@@ -35,10 +32,7 @@ impl FileTool {
 
     #[allow(dead_code)]
     pub fn with_max_size(dir: String, max_size: u64) -> Self {
-        Self {
-            allowed_directory: Some(dir),
-            max_file_size: max_size,
-        }
+        Self::with_config(Some(dir), max_size)
     }
 
     fn is_path_allowed(&self, path: &str) -> bool {

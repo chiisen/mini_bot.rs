@@ -16,7 +16,6 @@ pub struct Agent {
     #[allow(dead_code)]
     memory: Option<SqliteMemory>,
     config: Config,
-    tool_iterations: usize,
     start_time: Option<Instant>,
 }
 
@@ -50,7 +49,6 @@ impl Agent {
             history: history::History::new(config.agent.max_history_messages),
             memory: None,
             config,
-            tool_iterations: 0,
             start_time: None,
         })
     }
@@ -108,7 +106,6 @@ impl Agent {
 
             if !response.tool_calls.is_empty() {
                 tool_iterations += 1;
-                self.tool_iterations += 1;
 
                 for tool_call in &response.tool_calls {
                     let result = self.execute_tool(tool_call).await.map_err(anyhow::Error::msg)?;
@@ -140,7 +137,7 @@ impl Agent {
 }
 
 pub async fn run(message: Option<String>) -> Result<()> {
-    let config = load_config()?;
+    let config = Config::load_or_default()?;
 
     let mut agent = Agent::new(config)?;
 
@@ -171,14 +168,4 @@ pub async fn run(message: Option<String>) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn load_config() -> Result<Config> {
-    let path = Config::default_path();
-    
-    if path.exists() {
-        Config::load(&path).or_else(|_| Ok(Config::default()))
-    } else {
-        Ok(Config::default())
-    }
 }

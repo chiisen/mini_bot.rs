@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::env;
 use std::path::PathBuf;
 
 pub mod crypto;
@@ -81,6 +80,15 @@ impl Default for Config {
 }
 
 impl Config {
+    pub fn load_or_default() -> anyhow::Result<Self> {
+        let path = Self::default_path();
+        if path.exists() {
+            Self::load(&path).or_else(|_| Ok(Self::default()))
+        } else {
+            Ok(Self::default())
+        }
+    }
+
     pub fn load(path: &PathBuf) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let mut config: Config = toml::from_str(&content)?;

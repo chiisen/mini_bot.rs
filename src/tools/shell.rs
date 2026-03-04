@@ -35,13 +35,6 @@ impl ShellTool {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn with_timeout(commands: Vec<String>, timeout_secs: u64) -> Self {
-        Self {
-            allowed_commands: commands,
-            timeout_secs,
-        }
-    }
 
     fn is_command_allowed(&self, cmd: &str) -> bool {
         if self.allowed_commands.is_empty() {

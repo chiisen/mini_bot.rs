@@ -5,13 +5,13 @@
 mod handlers;
 
 use crate::agent::Agent;
-use crate::config::{Config, GatewaySecurityConfig};
+use crate::config::Config;
 use anyhow::Result;
 use axum::{
     body::Body,
     extract::{ConnectInfo, State},
     extract::Request,
-    http::{self, StatusCode},
+    http::StatusCode,
     middleware::Next,
     response::Response,
     routing::{get, post},
@@ -130,7 +130,7 @@ async fn auth_middleware(
 }
 
 pub async fn run(host: &str, port: u16) -> Result<()> {
-    let config = load_config()?;
+    let config = Config::load_or_default()?;
     let agent = Agent::new(config.clone())?;
 
     let state = GatewayState {
@@ -146,17 +146,10 @@ pub async fn run(host: &str, port: u16) -> Result<()> {
 
     let rate_limiter = RateLimiter::new(max_requests, window_secs);
 
-    let cors_layer = if let Some(ref security) = config.gateway_security {
-        CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods(Any)
-            .allow_headers(Any)
-    } else {
-        CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods(Any)
-            .allow_headers(Any)
-    };
+    let cors_layer = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
 
     let app = Router::new()
         .route("/", get(root_handler))
@@ -164,7 +157,10 @@ pub async fn run(host: &str, port: u16) -> Result<()> {
         .route("/health", get(health_handler))
         .layer(cors_layer)
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
-        .layer(TimeoutLayer::new(std::time::Duration::from_secs(30)))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            std::time::Duration::from_secs(30),
+        ))
         .layer(TraceLayer::new_for_http())
         .route_layer(axum::middleware::from_fn_with_state(
             rate_limiter.clone(),
@@ -184,14 +180,4 @@ pub async fn run(host: &str, port: u16) -> Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
-}
-
-fn load_config() -> Result<Config> {
-    let path = Config::default_path();
-    
-    if path.exists() {
-        Config::load(&path).or_else(|_| Ok(Config::default()))
-    } else {
-        Ok(Config::default())
-    }
 }
