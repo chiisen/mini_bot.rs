@@ -1469,7 +1469,7 @@ fn load_config() -> Result<Config> {
 - [x] 實作 File Tool
 - [x] 實作 SQLite Memory 後端
 - [x] 實作 Agent 主迴圈
-- [ ] 實作 Gateway 伺服器（可選）
+- [x] 實作 Gateway 伺服器（可選）
 - [x] 通過編譯和基本測試
 
 ---
@@ -1487,9 +1487,9 @@ fn load_config() -> Result<Config> {
    - [ ] Ollama (本地模型)
 
 2. **更多的 Tools**
-   - [ ] Web Fetch Tool
+   - [x] Web Fetch Tool (待實現)
    - [ ] Web Search Tool
-   - [ ] File Read/Write Tool
+   - [x] File Read/Write Tool
    - [ ] HTTP Request Tool
 
 3. **Channels（通訊頻道）**
@@ -1542,4 +1542,4 @@ fn load_config() -> Result<Config> {
 
 ---
 
-*本文件最後更新於 2026-03-02*
+*本文件最後更新於 2026-03-04*

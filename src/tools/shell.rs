@@ -1,20 +1,22 @@
 use super::traits::{Tool, ToolArgument, ToolDefinition, ToolResult};
 use async_trait::async_trait;
-use std::process::{Command, Stdio};
 use std::time::Duration;
+use tokio::process::Command as AsyncCommand;
 use tokio::time::timeout;
+
+const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 #[derive(Debug)]
 pub struct ShellTool {
     allowed_commands: Vec<String>,
-    timeout: Duration,
+    timeout_secs: u64,
 }
 
 impl ShellTool {
     pub fn new() -> Self {
         Self {
             allowed_commands: vec![],
-            timeout: Duration::from_secs(30),
+            timeout_secs: DEFAULT_TIMEOUT_SECS,
         }
     }
 
@@ -22,14 +24,22 @@ impl ShellTool {
     pub fn with_allowed(commands: Vec<String>) -> Self {
         Self {
             allowed_commands: commands,
-            timeout: Duration::from_secs(30),
+            timeout_secs: DEFAULT_TIMEOUT_SECS,
         }
     }
 
     pub fn with_config(commands: Vec<String>, timeout_secs: u64) -> Self {
         Self {
             allowed_commands: commands,
-            timeout: Duration::from_secs(timeout_secs),
+            timeout_secs,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_timeout(commands: Vec<String>, timeout_secs: u64) -> Self {
+        Self {
+            allowed_commands: commands,
+            timeout_secs,
         }
     }
 
@@ -84,26 +94,30 @@ impl Tool for ShellTool {
             });
         }
 
-        let timeout = self.timeout;
+        let timeout_duration = Duration::from_secs(self.timeout_secs);
 
-        let result = timeout(timeout, async {
-            #[cfg(unix)]
-            let output = Command::new("sh")
-                .arg("-c")
-                .arg(command)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output();
+        let result = timeout(
+            timeout_duration,
+            async {
+                #[cfg(unix)]
+                {
+                    AsyncCommand::new("sh")
+                        .arg("-c")
+                        .arg(command)
+                        .output()
+                        .await
+                }
 
-            #[cfg(windows)]
-            let output = Command::new("cmd")
-                .args(["/C", command])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output();
-
-            output
-        }).await;
+                #[cfg(windows)]
+                {
+                    AsyncCommand::new("cmd")
+                        .args(["/C", command])
+                        .output()
+                        .await
+                }
+            },
+        )
+        .await;
 
         match result {
             Ok(Ok(output)) => {
@@ -136,7 +150,10 @@ impl Tool for ShellTool {
             Err(_) => Ok(ToolResult {
                 success: false,
                 output: String::new(),
-                error: Some(format!("Command execution timed out after {:?}", timeout)),
+                error: Some(format!(
+                    "Command timed out after {} seconds",
+                    self.timeout_secs
+                )),
             }),
         }
     }
@@ -180,7 +197,7 @@ mod tests {
     #[tokio::test]
     async fn test_shell_execute_echo() {
         let tool = ShellTool::with_allowed(vec!["echo".to_string()]);
-        let result = tool.execute(r#"{"command": "echo"}"#).await;
+        let result = tool.execute(r#"{"command": "echo hello"}"#).await;
         assert!(result.unwrap().success);
     }
 

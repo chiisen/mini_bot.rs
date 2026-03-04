@@ -9,21 +9,21 @@ use crate::config::{Config, GatewaySecurityConfig};
 use anyhow::Result;
 use axum::{
     body::Body,
-    extract::ConnectInfo,
+    extract::{ConnectInfo, State},
     extract::Request,
+    http::{self, StatusCode},
     middleware::Next,
     response::Response,
     routing::{get, post},
     Router,
 };
-use http::header;
 use std::{
     collections::HashMap,
     net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
@@ -89,7 +89,7 @@ async fn rate_limit_middleware(
 
     if !limiter.is_allowed(&client_ip).await {
         let mut response = Response::new(Body::from("Too Many Requests"));
-        *response.status_mut() = http::StatusCode::TOO_MANY_REQUESTS;
+        *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
         return response;
     }
 
@@ -107,7 +107,7 @@ async fn auth_middleware(
             let client_ip = addr.ip().to_string();
             if !security.allowed_ips.contains(&client_ip) {
                 let mut response = Response::new(Body::from("Forbidden: IP not allowed"));
-                *response.status_mut() = http::StatusCode::FORBIDDEN;
+                *response.status_mut() = StatusCode::FORBIDDEN;
                 return response;
             }
         }
@@ -115,12 +115,12 @@ async fn auth_middleware(
         if !security.api_key.is_empty() {
             let api_key = request
                 .headers()
-                .get(header::API_KEY)
+                .get("x-api-key")
                 .and_then(|v| v.to_str().ok());
 
             if api_key != Some(&security.api_key) {
                 let mut response = Response::new(Body::from("Unauthorized"));
-                *response.status_mut() = http::StatusCode::UNAUTHORIZED;
+                *response.status_mut() = StatusCode::UNAUTHORIZED;
                 return response;
             }
         }

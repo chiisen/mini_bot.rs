@@ -79,60 +79,53 @@ impl Agent {
             .map(|t| serde_json::to_value(t.definition()).unwrap())
             .collect();
 
-        let response = self
-            .provider
-            .chat(self.history.messages().to_vec(), Some(tool_definitions))
-            .await?;
+        let max_iterations = self.config.agent.max_tool_iterations;
+        let mut tool_iterations = 0;
 
-        self.history.add_message(response.message.clone());
-
-        if !response.tool_calls.is_empty() {
-            if self.tool_iterations >= self.config.agent.max_tool_iterations {
+        loop {
+            if tool_iterations >= max_iterations {
                 return Err(anyhow::anyhow!(
-                    "Max tool iterations ({}) reached",
-                    self.config.agent.max_tool_iterations
+                    "Max tool iterations ({}) exceeded",
+                    max_iterations
                 ));
             }
 
-            for tool_call in &response.tool_calls {
-                if self.tool_iterations >= self.config.agent.max_tool_iterations {
+            if let Some(start) = self.start_time {
+                if start.elapsed() > max_time {
                     return Err(anyhow::anyhow!(
-                        "Max tool iterations ({}) reached",
-                        self.config.agent.max_tool_iterations
+                        "Max execution time ({}) exceeded",
+                        max_time.as_secs()
                     ));
                 }
-
-                if let Some(start) = self.start_time {
-                    if start.elapsed() > max_time {
-                        return Err(anyhow::anyhow!(
-                            "Max execution time ({}) exceeded",
-                            max_time.as_secs()
-                        ));
-                    }
-                }
-
-                let result = self.execute_tool(tool_call).await.map_err(anyhow::Error::msg)?;
-                self.tool_iterations += 1;
-                
-                self.history.add_message(Message {
-                    role: "tool".to_string(),
-                    content: format!(
-                        "Tool {} result: {}",
-                        tool_call.name,
-                        if result.success { result.output } else { result.error.unwrap_or_default() }
-                    ),
-                });
             }
 
-            let final_response = self
+            let response = self
                 .provider
-                .chat(self.history.messages().to_vec(), None)
+                .chat(self.history.messages().to_vec(), Some(tool_definitions.clone()))
                 .await?;
 
-            return Ok(final_response.message.content);
-        }
+            self.history.add_message(response.message.clone());
 
-        Ok(response.message.content)
+            if !response.tool_calls.is_empty() {
+                tool_iterations += 1;
+                self.tool_iterations += 1;
+
+                for tool_call in &response.tool_calls {
+                    let result = self.execute_tool(tool_call).await.map_err(anyhow::Error::msg)?;
+                    
+                    self.history.add_message(Message {
+                        role: "tool".to_string(),
+                        content: format!(
+                            "Tool {} result: {}",
+                            tool_call.name,
+                            if result.success { result.output } else { result.error.unwrap_or_default() }
+                        ),
+                    });
+                }
+            } else {
+                return Ok(response.message.content);
+            }
+        }
     }
 
     async fn execute_tool(&self, tool_call: &ToolCall) -> Result<ToolResult, String> {

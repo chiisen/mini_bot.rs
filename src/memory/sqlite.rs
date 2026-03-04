@@ -123,17 +123,17 @@ impl Memory for SqliteMemory {
         let mut rows = stmt.query([id])
             .map_err(|e| format!("Failed to query: {}", e))?;
 
-        if let Some(row) = rows.next().map_err(|e| format!("Failed to get row: ", e))? {
-            let content: String = row.get(3).map_err(|e| format!("Failed to get column: ", e))?;
+        if let Some(row) = rows.next().map_err(|e| format!("Failed to get row: {}", e))? {
+            let content: String = row.get(3).map_err(|e| format!("Failed to get column: {}", e))?;
             let decrypted_content = self.decrypt_content(&content);
             
             Ok(Some(MemoryEntry {
-                id: row.get(0).map_err(|e| format!("Failed to get column: ", e))?,
-                category: row.get(1).map_err(|e| format!("Failed to get column: ", e))?,
-                key: row.get(2).map_err(|e| format!("Failed to get column: ", e))?,
+                id: row.get(0).map_err(|e| format!("Failed to get column: {}", e))?,
+                category: row.get(1).map_err(|e| format!("Failed to get column: {}", e))?,
+                key: row.get(2).map_err(|e| format!("Failed to get column: {}", e))?,
                 content: decrypted_content,
-                created_at: row.get(4).map_err(|e| format!("Failed to get column: ", e))?,
-                updated_at: row.get(5).map_err(|e| format!("Failed to get column: ", e))?,
+                created_at: row.get(4).map_err(|e| format!("Failed to get column: {}", e))?,
+                updated_at: row.get(5).map_err(|e| format!("Failed to get column: {}", e))?,
             }))
         } else {
             Ok(None)
@@ -152,7 +152,7 @@ impl Memory for SqliteMemory {
              WHERE category = ?1 
              ORDER BY updated_at DESC 
              LIMIT ?2"
-        ).map_err(|e| format!("Failed to prepare statement: ", e))?;
+        ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
         let entries = stmt.query_map([category, &limit.to_string()], |row| {
             Ok(MemoryEntry {
@@ -163,9 +163,9 @@ impl Memory for SqliteMemory {
                 created_at: row.get(4)?,
                 updated_at: row.get(5)?,
             })
-        }).map_err(|e| format!("Failed to query: ", e))?
+        }).map_err(|e| format!("Failed to query: {}", e))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("Failed to collect results: ", e))?;
+        .map_err(|e| format!("Failed to collect results: {}", e))?;
 
         let decrypted_entries: Vec<MemoryEntry> = entries
             .into_iter()
@@ -183,7 +183,7 @@ impl Memory for SqliteMemory {
 
         let conn = self.conn.lock();
         conn.execute("DELETE FROM memories WHERE id = ?1", [id])
-            .map_err(|e| format!("Failed to delete memory: ", e))?;
+            .map_err(|e| format!("Failed to delete memory: {}", e))?;
         Ok(())
     }
 
@@ -194,7 +194,7 @@ impl Memory for SqliteMemory {
 
         let conn = self.conn.lock();
         conn.execute("DELETE FROM memories WHERE category = ?1", [category])
-            .map_err(|e| format!("Failed to clear category: ", e))?;
+            .map_err(|e| format!("Failed to clear category: {}", e))?;
         Ok(())
     }
 }

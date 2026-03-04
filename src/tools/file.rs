@@ -2,7 +2,7 @@ use super::traits::{Tool, ToolArgument, ToolDefinition, ToolResult};
 use async_trait::async_trait;
 use std::path::Path;
 
-const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
+const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
 
 #[derive(Debug)]
 pub struct FileTool {
@@ -29,6 +29,14 @@ impl FileTool {
     pub fn with_config(dir: Option<String>, max_size: u64) -> Self {
         Self {
             allowed_directory: dir,
+            max_file_size: max_size,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_max_size(dir: String, max_size: u64) -> Self {
+        Self {
+            allowed_directory: Some(dir),
             max_file_size: max_size,
         }
     }
@@ -130,14 +138,6 @@ impl Tool for FileTool {
 
         match operation {
             "read" => {
-                if !self.is_path_allowed(path) {
-                    return Ok(ToolResult {
-                        success: false,
-                        output: String::new(),
-                        error: Some("Path not in allowed directory".to_string()),
-                    });
-                }
-
                 if let Err(e) = self.check_file_size(path) {
                     return Ok(ToolResult {
                         success: false,
@@ -168,15 +168,11 @@ impl Tool for FileTool {
                     return Ok(ToolResult {
                         success: false,
                         output: String::new(),
-                        error: Some(format!("Content size exceeds limit {}", self.max_file_size)),
-                    });
-                }
-
-                if !self.is_path_allowed(path) {
-                    return Ok(ToolResult {
-                        success: false,
-                        output: String::new(),
-                        error: Some("Path not in allowed directory".to_string()),
+                        error: Some(format!(
+                            "Content too large: {} bytes (max: {} bytes)",
+                            content.len(),
+                            self.max_file_size
+                        )),
                     });
                 }
                 
