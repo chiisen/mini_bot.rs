@@ -28,7 +28,7 @@ impl Agent {
         ).map_err(anyhow::Error::msg)?;
 
         let tools: Vec<Arc<dyn Tool>> = vec![
-            Arc::new(ShellTool::new()),
+            Arc::new(ShellTool::with_allowed(config.security.allowed_commands.clone())),
             Arc::new(FileTool::new()),
         ];
 

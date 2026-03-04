@@ -18,7 +18,7 @@
 - [x] 預設拒絕所有命令，而非允許
 - [ ] 實作更嚴格的命令驗證 (完整匹配或正則表達式)
 - [x] 添加命令執行超時 (建議 30 秒)
-- [ ] 整合 Config 中的 `security.allowed_commands`
+- [x] 整合 Config 中的 `security.allowed_commands`
 
 ---
 

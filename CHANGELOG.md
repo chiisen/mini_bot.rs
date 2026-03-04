@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File Tool 檔案大小限制 (預設 10MB)
 - Shell Tool 命令執行超時 (預設 30 秒)
 - Shell Tool 預設拒絕所有命令 (安全強化)
+- Agent 整合 Config 中的 security.allowed_commands
 
 ### Changed
 - Agent 工具迭代次數限制（使用 `max_tool_iterations` 配置）
