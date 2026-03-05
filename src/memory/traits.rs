@@ -17,7 +17,11 @@ pub struct MemoryEntry {
 pub trait Memory: Send + Sync {
     async fn store(&self, entry: &MemoryEntry) -> Result<(), String>;
     async fn get(&self, id: &str) -> Result<Option<MemoryEntry>, String>;
-    async fn list_by_category(&self, category: &str, limit: usize) -> Result<Vec<MemoryEntry>, String>;
+    async fn list_by_category(
+        &self,
+        category: &str,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>, String>;
     async fn delete(&self, id: &str) -> Result<(), String>;
     async fn clear_category(&self, category: &str) -> Result<(), String>;
 }

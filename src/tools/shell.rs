@@ -35,14 +35,11 @@ impl ShellTool {
         }
     }
 
-
     fn is_command_allowed(&self, cmd: &str) -> bool {
         if self.allowed_commands.is_empty() {
             return false;
         }
-        self.allowed_commands
-            .iter()
-            .any(|allowed| cmd == allowed)
+        self.allowed_commands.iter().any(|allowed| cmd == allowed)
     }
 }
 
@@ -89,27 +86,24 @@ impl Tool for ShellTool {
 
         let timeout_duration = Duration::from_secs(self.timeout_secs);
 
-        let result = timeout(
-            timeout_duration,
-            async {
-                #[cfg(unix)]
-                {
-                    AsyncCommand::new("sh")
-                        .arg("-c")
-                        .arg(command)
-                        .output()
-                        .await
-                }
+        let result = timeout(timeout_duration, async {
+            #[cfg(unix)]
+            {
+                AsyncCommand::new("sh")
+                    .arg("-c")
+                    .arg(command)
+                    .output()
+                    .await
+            }
 
-                #[cfg(windows)]
-                {
-                    AsyncCommand::new("cmd")
-                        .args(["/C", command])
-                        .output()
-                        .await
-                }
-            },
-        )
+            #[cfg(windows)]
+            {
+                AsyncCommand::new("cmd")
+                    .args(["/C", command])
+                    .output()
+                    .await
+            }
+        })
         .await;
 
         match result {

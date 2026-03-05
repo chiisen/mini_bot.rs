@@ -59,14 +59,17 @@ impl FileTool {
     }
 
     fn check_file_size(&self, path: &str) -> Result<u64, String> {
-        let metadata = std::fs::metadata(path)
-            .map_err(|e| format!("Failed to get file metadata: {}", e))?;
-        
+        let metadata =
+            std::fs::metadata(path).map_err(|e| format!("Failed to get file metadata: {}", e))?;
+
         let size = metadata.len();
         if size > self.max_file_size {
-            return Err(format!("File size {} exceeds limit {}", size, self.max_file_size));
+            return Err(format!(
+                "File size {} exceeds limit {}",
+                size, self.max_file_size
+            ));
         }
-        
+
         Ok(size)
     }
 }
@@ -117,10 +120,8 @@ impl Tool for FileTool {
         let operation = args["operation"]
             .as_str()
             .ok_or("Missing 'operation' parameter")?;
-        
-        let path = args["path"]
-            .as_str()
-            .ok_or("Missing 'path' parameter")?;
+
+        let path = args["path"].as_str().ok_or("Missing 'path' parameter")?;
 
         if !self.is_path_allowed(path) {
             return Ok(ToolResult {
@@ -157,7 +158,7 @@ impl Tool for FileTool {
                 let content = args["content"]
                     .as_str()
                     .ok_or("Missing 'content' parameter for write operation")?;
-                
+
                 if content.len() as u64 > self.max_file_size {
                     return Ok(ToolResult {
                         success: false,
@@ -169,7 +170,7 @@ impl Tool for FileTool {
                         )),
                     });
                 }
-                
+
                 match tokio::fs::write(path, content).await {
                     Ok(_) => Ok(ToolResult {
                         success: true,
@@ -232,20 +233,30 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("test.txt");
         let file_path_str = file_path.to_string_lossy().to_string();
-        
+
         let tool = FileTool::with_directory(temp_dir.path().to_string_lossy().to_string());
-        
-        let write_result = tool.execute(&serde_json::json!({
-            "operation": "write",
-            "path": file_path_str,
-            "content": "Hello, World!"
-        }).to_string()).await;
+
+        let write_result = tool
+            .execute(
+                &serde_json::json!({
+                    "operation": "write",
+                    "path": file_path_str,
+                    "content": "Hello, World!"
+                })
+                .to_string(),
+            )
+            .await;
         assert!(write_result.unwrap().success);
-        
-        let read_result = tool.execute(&serde_json::json!({
-            "operation": "read",
-            "path": file_path_str
-        }).to_string()).await;
+
+        let read_result = tool
+            .execute(
+                &serde_json::json!({
+                    "operation": "read",
+                    "path": file_path_str
+                })
+                .to_string(),
+            )
+            .await;
         let result = read_result.unwrap();
         assert!(result.success);
         assert_eq!(result.output, "Hello, World!");
@@ -256,15 +267,21 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("test.txt");
         let file_path_str = file_path.to_string_lossy().to_string();
-        
+
         std::fs::write(&file_path, "test").unwrap();
-        
+
         let tool = FileTool::with_directory(temp_dir.path().to_string_lossy().to_string());
-        let result = tool.execute(&serde_json::json!({
-            "operation": "exists",
-            "path": file_path_str
-        }).to_string()).await.unwrap();
-        
+        let result = tool
+            .execute(
+                &serde_json::json!({
+                    "operation": "exists",
+                    "path": file_path_str
+                })
+                .to_string(),
+            )
+            .await
+            .unwrap();
+
         assert!(result.success);
         assert_eq!(result.output, "true");
     }
@@ -272,14 +289,20 @@ mod tests {
     #[tokio::test]
     async fn test_file_read_nonexistent() {
         let tool = FileTool::with_directory(".".to_string());
-        let result = tool.execute(r#"{"operation": "read", "path": "/nonexistent/file.txt"}"#).await.unwrap();
+        let result = tool
+            .execute(r#"{"operation": "read", "path": "/nonexistent/file.txt"}"#)
+            .await
+            .unwrap();
         assert!(!result.success);
     }
 
     #[tokio::test]
     async fn test_file_no_directory_allowed() {
         let tool = FileTool::new();
-        let result = tool.execute(r#"{"operation": "read", "path": "test.txt"}"#).await.unwrap();
+        let result = tool
+            .execute(r#"{"operation": "read", "path": "test.txt"}"#)
+            .await
+            .unwrap();
         assert!(!result.success);
     }
 
@@ -287,12 +310,18 @@ mod tests {
     async fn test_file_path_traversal_blocked() {
         let temp_dir = TempDir::new().unwrap();
         let tool = FileTool::with_directory(temp_dir.path().to_string_lossy().to_string());
-        
-        let result = tool.execute(&serde_json::json!({
-            "operation": "read",
-            "path": "../Cargo.toml"
-        }).to_string()).await.unwrap();
-        
+
+        let result = tool
+            .execute(
+                &serde_json::json!({
+                    "operation": "read",
+                    "path": "../Cargo.toml"
+                })
+                .to_string(),
+            )
+            .await
+            .unwrap();
+
         assert!(!result.success);
     }
 }

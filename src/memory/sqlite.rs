@@ -20,8 +20,8 @@ impl SqliteMemory {
 
     #[allow(dead_code)]
     pub fn new_with_key(path: PathBuf, key: Option<String>) -> Result<Self, String> {
-        let conn = Connection::open(&path)
-            .map_err(|e| format!("Failed to open database: {}", e))?;
+        let conn =
+            Connection::open(&path).map_err(|e| format!("Failed to open database: {}", e))?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS memories (
@@ -33,17 +33,20 @@ impl SqliteMemory {
                 updated_at INTEGER NOT NULL
             )",
             [],
-        ).map_err(|e| format!("Failed to create table: {}", e))?;
+        )
+        .map_err(|e| format!("Failed to create table: {}", e))?;
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)",
             [],
-        ).map_err(|e| format!("Failed to create index: {}", e))?;
+        )
+        .map_err(|e| format!("Failed to create index: {}", e))?;
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key)",
             [],
-        ).map_err(|e| format!("Failed to create index: {}", e))?;
+        )
+        .map_err(|e| format!("Failed to create index: {}", e))?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -82,7 +85,10 @@ impl SqliteMemory {
         if id.is_empty() || id.len() > 255 {
             return Err("Invalid ID length".to_string());
         }
-        if !id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        if !id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
             return Err("Invalid ID characters".to_string());
         }
         Ok(())
@@ -108,7 +114,8 @@ impl Memory for SqliteMemory {
                 entry.created_at,
                 entry.updated_at,
             ),
-        ).map_err(|e| format!("Failed to store memory: {}", e))?;
+        )
+        .map_err(|e| format!("Failed to store memory: {}", e))?;
         Ok(())
     }
 
@@ -120,52 +127,76 @@ impl Memory for SqliteMemory {
             "SELECT id, category, key, content, created_at, updated_at FROM memories WHERE id = ?1"
         ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
-        let mut rows = stmt.query([id])
+        let mut rows = stmt
+            .query([id])
             .map_err(|e| format!("Failed to query: {}", e))?;
 
-        if let Some(row) = rows.next().map_err(|e| format!("Failed to get row: {}", e))? {
-            let content: String = row.get(3).map_err(|e| format!("Failed to get column: {}", e))?;
+        if let Some(row) = rows
+            .next()
+            .map_err(|e| format!("Failed to get row: {}", e))?
+        {
+            let content: String = row
+                .get(3)
+                .map_err(|e| format!("Failed to get column: {}", e))?;
             let decrypted_content = self.decrypt_content(&content);
-            
+
             Ok(Some(MemoryEntry {
-                id: row.get(0).map_err(|e| format!("Failed to get column: {}", e))?,
-                category: row.get(1).map_err(|e| format!("Failed to get column: {}", e))?,
-                key: row.get(2).map_err(|e| format!("Failed to get column: {}", e))?,
+                id: row
+                    .get(0)
+                    .map_err(|e| format!("Failed to get column: {}", e))?,
+                category: row
+                    .get(1)
+                    .map_err(|e| format!("Failed to get column: {}", e))?,
+                key: row
+                    .get(2)
+                    .map_err(|e| format!("Failed to get column: {}", e))?,
                 content: decrypted_content,
-                created_at: row.get(4).map_err(|e| format!("Failed to get column: {}", e))?,
-                updated_at: row.get(5).map_err(|e| format!("Failed to get column: {}", e))?,
+                created_at: row
+                    .get(4)
+                    .map_err(|e| format!("Failed to get column: {}", e))?,
+                updated_at: row
+                    .get(5)
+                    .map_err(|e| format!("Failed to get column: {}", e))?,
             }))
         } else {
             Ok(None)
         }
     }
 
-    async fn list_by_category(&self, category: &str, limit: usize) -> Result<Vec<MemoryEntry>, String> {
+    async fn list_by_category(
+        &self,
+        category: &str,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>, String> {
         if category.is_empty() || category.len() > 255 {
             return Err("Invalid category length".to_string());
         }
 
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT id, category, key, content, created_at, updated_at 
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, category, key, content, created_at, updated_at 
              FROM memories 
              WHERE category = ?1 
              ORDER BY updated_at DESC 
-             LIMIT ?2"
-        ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
+             LIMIT ?2",
+            )
+            .map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
-        let entries = stmt.query_map([category, &limit.to_string()], |row| {
-            Ok(MemoryEntry {
-                id: row.get(0)?,
-                category: row.get(1)?,
-                key: row.get(2)?,
-                content: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+        let entries = stmt
+            .query_map([category, &limit.to_string()], |row| {
+                Ok(MemoryEntry {
+                    id: row.get(0)?,
+                    category: row.get(1)?,
+                    key: row.get(2)?,
+                    content: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
             })
-        }).map_err(|e| format!("Failed to query: {}", e))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("Failed to collect results: {}", e))?;
+            .map_err(|e| format!("Failed to query: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to collect results: {}", e))?;
 
         let decrypted_entries: Vec<MemoryEntry> = entries
             .into_iter()

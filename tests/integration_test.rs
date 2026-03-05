@@ -1,5 +1,5 @@
-use mini_bot_rs::Config;
 use mini_bot_rs::tools::Tool;
+use mini_bot_rs::Config;
 
 #[test]
 fn test_config_default() {
@@ -33,7 +33,7 @@ fn test_config_security_default() {
 #[tokio::test]
 async fn test_shell_tool_available() {
     use mini_bot_rs::tools::ShellTool;
-    
+
     let tool = ShellTool::new();
     let result = tool.execute(r#"{"command": "echo test"}"#).await;
     assert!(result.is_ok());
@@ -42,10 +42,10 @@ async fn test_shell_tool_available() {
 #[test]
 fn test_tools_module_exports() {
     use mini_bot_rs::tools::{FileTool, ShellTool, Tool};
-    
+
     let shell = ShellTool::new();
     assert_eq!(shell.name(), "shell");
-    
+
     let file = FileTool::new();
     assert_eq!(file.name(), "file");
 }

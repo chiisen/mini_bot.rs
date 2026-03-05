@@ -87,13 +87,13 @@ mod tests {
     fn test_provider_error_display() {
         let error = ProviderError::RequestFailed("connection timeout".to_string());
         assert!(error.to_string().contains("API request failed"));
-        
+
         let error = ProviderError::ParseFailed("invalid json".to_string());
         assert!(error.to_string().contains("Response parse failed"));
-        
+
         let error = ProviderError::AuthenticationFailed("invalid key".to_string());
         assert!(error.to_string().contains("Authentication failed"));
-        
+
         let error = ProviderError::QuotaExceeded("limit reached".to_string());
         assert!(error.to_string().contains("Quota exceeded"));
     }
