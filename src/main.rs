@@ -1,9 +1,6 @@
-mod agent;
-mod config;
-mod gateway;
-mod memory;
-mod providers;
-mod tools;
+use mini_bot_rs::agent;
+use mini_bot_rs::gateway;
+use mini_bot_rs::i18n::{tr, tr_with_args};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -40,29 +37,31 @@ async fn main() -> Result<()> {
     let subscriber = fmt::Subscriber::builder()
         .with_timer(tracing_subscriber::fmt::time::ChronoLocal::rfc_3339())
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info"))
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Failed to set tracing subscriber");
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 
     let cli = Cli::parse();
 
     match cli.command {
         Commands::Agent { message } => {
-            info!("Starting MiniBot Agent...");
+            info!("{}", tr("app.starting_agent"));
             agent::run(message).await?;
         }
         Commands::Gateway { port, host } => {
             let port = port.unwrap_or(3000);
             let host = host.unwrap_or_else(|| "127.0.0.1".to_string());
-            info!("Starting Gateway at {}:{}", host, port);
+            info!(
+                "{}",
+                tr_with_args("app.starting_gateway", &[&host, &port.to_string()])
+            );
             gateway::run(&host, port).await?;
         }
         Commands::Version => {
-            println!("MiniBot MVP v{}", env!("CARGO_PKG_VERSION"));
+            let version = env!("CARGO_PKG_VERSION");
+            println!("{}", tr_with_args("app.version", &[&version]));
         }
     }
 

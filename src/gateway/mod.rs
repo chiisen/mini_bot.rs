@@ -1,16 +1,17 @@
 //! Gateway module for MiniBot
-//! 
+//!
 //! Provides HTTP webhook server for external integrations.
 
 mod handlers;
 
 use crate::agent::Agent;
 use crate::config::Config;
+use crate::i18n::tr_with_args;
 use anyhow::Result;
 use axum::{
     body::Body,
-    extract::{ConnectInfo, State},
     extract::Request,
+    extract::{ConnectInfo, State},
     http::StatusCode,
     middleware::Next,
     response::Response,
@@ -174,7 +175,10 @@ pub async fn run(host: &str, port: u16) -> Result<()> {
 
     let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
 
-    info!("Gateway server listening on {}", addr);
+    info!(
+        "{}",
+        tr_with_args("gateway.listening", &[&addr.to_string()])
+    );
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;

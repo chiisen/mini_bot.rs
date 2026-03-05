@@ -1,24 +1,24 @@
 //! Gateway request handlers
 
-use crate::gateway::{GatewayState};
-use axum::{
-    extract::State,
-    response::Json,
-};
+use crate::gateway::GatewayState;
+use crate::i18n::tr_with_args;
+use axum::{extract::State, response::Json};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
 fn sanitize_for_log(s: &str) -> String {
     let sensitive_keys = ["api_key", "password", "token", "secret", "credential"];
     let mut result = s.to_string();
-    
+
     for key in sensitive_keys {
         let pattern = format!(r#""{}"\s*:\s*"[^"]*"#, key);
         if let Ok(re) = regex::Regex::new(&pattern) {
-            result = re.replace_all(&result, format!(r#""{}":"***"#, key)).to_string();
+            result = re
+                .replace_all(&result, format!(r#""{}":"***"#, key))
+                .to_string();
         }
     }
-    
+
     result
 }
 
@@ -56,25 +56,33 @@ pub async fn webhook_handler(
     Json(payload): Json<WebhookRequest>,
 ) -> Json<WebhookResponse> {
     let sanitized_message = sanitize_for_log(&payload.message);
-    info!("Received webhook request: {}", sanitized_message);
+    info!(
+        "{}",
+        tr_with_args("gateway.webhook_received", &[&sanitized_message])
+    );
 
-    let session_id = payload.session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let session_id = payload
+        .session_id
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     let mut agent = state.agent.lock().await;
 
     match agent.chat(&payload.message).await {
         Ok(response) => {
             let sanitized_response = sanitize_for_log(&response);
-            info!("Agent response: {}", sanitized_response);
+            info!(
+                "{}",
+                tr_with_args("gateway.agent_response", &[&sanitized_response])
+            );
             Json(WebhookResponse {
                 response,
                 session_id: Some(session_id),
             })
         }
         Err(e) => {
-            error!("Agent error: {}", e);
+            error!("{}", tr_with_args("gateway.agent_error", &[&e.to_string()]));
             Json(WebhookResponse {
-                response: format!("Error: {}", e),
+                response: tr_with_args("error.prefix", &[&e.to_string()]),
                 session_id: Some(session_id),
             })
         }

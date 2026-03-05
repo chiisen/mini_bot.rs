@@ -1,6 +1,7 @@
 mod history;
 
 use crate::config::Config;
+use crate::i18n::{tr, tr_with_args};
 use crate::memory::SqliteMemory;
 use crate::providers::create_provider;
 use crate::providers::{Message, Provider, ToolCall};
@@ -26,7 +27,8 @@ impl Agent {
             config.get_api_key(),
             config.default_model.clone(),
             config.agent.temperature,
-        ).map_err(anyhow::Error::msg)?;
+        )
+        .map_err(anyhow::Error::msg)?;
 
         let tools: Vec<Arc<dyn Tool>> = vec![
             Arc::new(ShellTool::with_config(
@@ -65,8 +67,8 @@ impl Agent {
         if let Some(start) = self.start_time {
             if start.elapsed() > max_time {
                 return Err(anyhow::anyhow!(
-                    "Max execution time ({}) exceeded",
-                    max_time.as_secs()
+                    "{}",
+                    tr_with_args("agent.max_time_exceeded", &[&max_time.as_secs()])
                 ));
             }
         }
@@ -83,23 +85,26 @@ impl Agent {
         loop {
             if tool_iterations >= max_iterations {
                 return Err(anyhow::anyhow!(
-                    "Max tool iterations ({}) exceeded",
-                    max_iterations
+                    "{}",
+                    tr_with_args("agent.max_iterations_exceeded", &[&max_iterations])
                 ));
             }
 
             if let Some(start) = self.start_time {
                 if start.elapsed() > max_time {
                     return Err(anyhow::anyhow!(
-                        "Max execution time ({}) exceeded",
-                        max_time.as_secs()
+                        "{}",
+                        tr_with_args("agent.max_time_exceeded", &[&max_time.as_secs()])
                     ));
                 }
             }
 
             let response = self
                 .provider
-                .chat(self.history.messages().to_vec(), Some(tool_definitions.clone()))
+                .chat(
+                    self.history.messages().to_vec(),
+                    Some(tool_definitions.clone()),
+                )
                 .await?;
 
             self.history.add_message(response.message.clone());
@@ -108,14 +113,21 @@ impl Agent {
                 tool_iterations += 1;
 
                 for tool_call in &response.tool_calls {
-                    let result = self.execute_tool(tool_call).await.map_err(anyhow::Error::msg)?;
-                    
+                    let result = self
+                        .execute_tool(tool_call)
+                        .await
+                        .map_err(anyhow::Error::msg)?;
+
                     self.history.add_message(Message {
                         role: "tool".to_string(),
                         content: format!(
                             "Tool {} result: {}",
                             tool_call.name,
-                            if result.success { result.output } else { result.error.unwrap_or_default() }
+                            if result.success {
+                                result.output
+                            } else {
+                                result.error.unwrap_or_default()
+                            }
                         ),
                     });
                 }
@@ -145,24 +157,24 @@ pub async fn run(message: Option<String>) -> Result<()> {
         let response = agent.chat(&msg).await?;
         println!("{}", response);
     } else {
-        println!("MiniBot Agent started. Type 'exit' to quit.");
-        
+        println!("{}", tr("agent.started"));
+
         use std::io::{self, Write};
         loop {
             print!("> ");
             io::stdout().flush()?;
-            
+
             let mut input = String::new();
             io::stdin().read_line(&mut input)?;
-            
+
             let input = input.trim();
             if input == "exit" {
                 break;
             }
-            
+
             match agent.chat(input).await {
                 Ok(response) => println!("{}", response),
-                Err(e) => eprintln!("Error: {}", e),
+                Err(e) => eprintln!("{}", tr_with_args("error.prefix", &[&e])),
             }
         }
     }
