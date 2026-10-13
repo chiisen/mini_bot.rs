@@ -1,6 +1,6 @@
 use super::traits::{Tool, ToolArgument, ToolDefinition, ToolResult};
 use async_trait::async_trait;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10MB
 
@@ -35,27 +35,49 @@ impl FileTool {
         Self::with_config(Some(dir), max_size)
     }
 
-    fn is_path_allowed(&self, path: &str) -> bool {
-        if self.allowed_directory.is_none() {
-            return false;
-        }
+    fn resolved_path(&self, path: &str) -> Option<PathBuf> {
+        let allowed = self.allowed_directory.as_ref()?;
+        let root = Path::new(allowed).canonicalize().ok()?;
+        let requested = Path::new(path);
+        let absolute = if requested.is_absolute() {
+            requested.to_path_buf()
+        } else {
+            root.join(requested)
+        };
 
-        let path = Path::new(path);
-
-        if path.components().any(|c| c.as_os_str() == "..") {
-            return false;
-        }
-
-        if let Some(ref allowed) = self.allowed_directory {
-            let allowed_path = Path::new(allowed);
-            if let Ok(canonical) = path.canonicalize() {
-                if let Ok(allowed_canonical) = allowed_path.canonicalize() {
-                    return canonical.starts_with(allowed_canonical);
+        let mut current = PathBuf::new();
+        let mut missing = false;
+        for component in absolute.components() {
+            match component {
+                Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+                Component::RootDir => current.push("/"),
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if missing || !current.pop() {
+                        return None;
+                    }
+                }
+                Component::Normal(part) => {
+                    if missing {
+                        return None;
+                    }
+                    let next = current.join(part);
+                    if next.exists() {
+                        current = next.canonicalize().ok()?;
+                        if !root.starts_with(&current) && !current.starts_with(&root) {
+                            return None;
+                        }
+                    } else if !current.starts_with(&root) {
+                        return None;
+                    } else {
+                        current = next;
+                        missing = true;
+                    }
                 }
             }
         }
 
-        true
+        current.starts_with(&root).then_some(current)
     }
 
     fn check_file_size(&self, path: &str) -> Result<u64, String> {
@@ -123,17 +145,18 @@ impl Tool for FileTool {
 
         let path = args["path"].as_str().ok_or("Missing 'path' parameter")?;
 
-        if !self.is_path_allowed(path) {
+        let Some(path_buf) = self.resolved_path(path) else {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
                 error: Some("Path not in allowed directory".to_string()),
             });
-        }
+        };
+        let path = path_buf.to_string_lossy().to_string();
 
         match operation {
             "read" => {
-                if let Err(e) = self.check_file_size(path) {
+                if let Err(e) = self.check_file_size(&path) {
                     return Ok(ToolResult {
                         success: false,
                         output: String::new(),
@@ -185,15 +208,7 @@ impl Tool for FileTool {
                 }
             }
             "exists" => {
-                if !self.is_path_allowed(path) {
-                    return Ok(ToolResult {
-                        success: false,
-                        output: String::new(),
-                        error: Some("Path not in allowed directory".to_string()),
-                    });
-                }
-
-                let exists = Path::new(path).exists();
+                let exists = Path::new(&path).exists();
                 Ok(ToolResult {
                     success: true,
                     output: exists.to_string(),
@@ -323,5 +338,28 @@ mod tests {
             .unwrap();
 
         assert!(!result.success);
+    }
+
+    #[tokio::test]
+    async fn test_file_write_outside_root_rejected() {
+        let root = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let target = outside.path().join("new.txt");
+        let tool = FileTool::with_directory(root.path().to_string_lossy().to_string());
+
+        let result = tool
+            .execute(
+                &serde_json::json!({
+                    "operation": "write",
+                    "path": target,
+                    "content": "nope"
+                })
+                .to_string(),
+            )
+            .await
+            .unwrap();
+
+        assert!(!result.success);
+        assert!(!target.exists());
     }
 }

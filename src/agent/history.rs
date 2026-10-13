@@ -29,6 +29,13 @@ impl History {
         &self.messages
     }
 
+    pub fn replace(&mut self, messages: Vec<Message>) {
+        self.messages.clear();
+        for message in messages {
+            self.add_message(message);
+        }
+    }
+
     #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.messages.clear();

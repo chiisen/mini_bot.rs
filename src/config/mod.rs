@@ -8,7 +8,7 @@ pub struct Config {
     pub version: String,
     pub default_provider: String,
     pub default_model: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub api_key: String,
     pub gateway: GatewayConfig,
     pub gateway_security: Option<GatewaySecurityConfig>,

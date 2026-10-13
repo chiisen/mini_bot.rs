@@ -35,12 +35,34 @@ impl ShellTool {
         }
     }
 
-    fn is_command_allowed(&self, cmd: &str) -> bool {
-        if self.allowed_commands.is_empty() {
+    fn is_command_allowed(&self, program: &str) -> bool {
+        if self.allowed_commands.is_empty() || program.contains('/') || program.contains('\\') {
             return false;
         }
-        self.allowed_commands.iter().any(|allowed| cmd == allowed)
+        self.allowed_commands
+            .iter()
+            .any(|allowed| program == allowed)
     }
+}
+
+fn parse_argv(command: &str) -> Result<Vec<String>, String> {
+    if command.chars().any(|c| {
+        matches!(
+            c,
+            ';' | '|' | '&' | '$' | '`' | '<' | '>' | '(' | ')' | '\n' | '\\'
+        )
+    }) {
+        return Err("Shell metacharacters are not allowed".to_string());
+    }
+
+    let parts: Vec<String> = command.split_whitespace().map(str::to_string).collect();
+    if parts.is_empty() {
+        return Err("Missing command".to_string());
+    }
+    if parts[0].contains('/') || parts[0].contains('\\') {
+        return Err("Command path is not allowed".to_string());
+    }
+    Ok(parts)
 }
 
 impl Default for ShellTool {
@@ -63,7 +85,8 @@ impl Tool for ShellTool {
                 name: "command".to_string(),
                 arg_type: "string".to_string(),
                 required: true,
-                description: "Command to execute".to_string(),
+                description: "Program and arguments separated by spaces. The shell is not used."
+                    .to_string(),
             }],
         }
     }
@@ -76,33 +99,31 @@ impl Tool for ShellTool {
             .as_str()
             .ok_or("Missing 'command' parameter")?;
 
-        if !self.is_command_allowed(command) {
+        let argv = match parse_argv(command) {
+            Ok(argv) => argv,
+            Err(error) => {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(error),
+                });
+            }
+        };
+
+        if !self.is_command_allowed(&argv[0]) {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
-                error: Some(format!("Command '{}' not in allowlist", command)),
+                error: Some(format!("Command '{}' not in allowlist", argv[0])),
             });
         }
 
         let timeout_duration = Duration::from_secs(self.timeout_secs);
+        let program = argv[0].clone();
+        let argv_rest = argv[1..].to_vec();
 
-        let result = timeout(timeout_duration, async {
-            #[cfg(unix)]
-            {
-                AsyncCommand::new("sh")
-                    .arg("-c")
-                    .arg(command)
-                    .output()
-                    .await
-            }
-
-            #[cfg(windows)]
-            {
-                AsyncCommand::new("cmd")
-                    .args(["/C", command])
-                    .output()
-                    .await
-            }
+        let result = timeout(timeout_duration, async move {
+            AsyncCommand::new(program).args(argv_rest).output().await
         })
         .await;
 
@@ -176,9 +197,18 @@ mod tests {
         let tool = ShellTool::with_allowed(vec!["ls".to_string(), "echo".to_string()]);
         assert!(tool.is_command_allowed("ls"));
         assert!(tool.is_command_allowed("echo"));
-        assert!(!tool.is_command_allowed("ls -la"));
-        assert!(!tool.is_command_allowed("echo hello"));
-        assert!(!tool.is_command_allowed("rm -rf /"));
+        assert!(!tool.is_command_allowed("rm"));
+        assert!(!tool.is_command_allowed("/bin/ls"));
+    }
+
+    #[tokio::test]
+    async fn test_shell_rejects_metacharacters() {
+        let tool = ShellTool::with_allowed(vec!["echo".to_string()]);
+        let result = tool
+            .execute(r#"{"command": "echo hello; rm -rf /"}"#)
+            .await
+            .unwrap();
+        assert!(!result.success);
     }
 
     #[tokio::test]

@@ -7,6 +7,7 @@ mod handlers;
 use crate::agent::Agent;
 use crate::config::Config;
 use crate::i18n::tr_with_args;
+use crate::memory::SqliteMemory;
 use anyhow::Result;
 use axum::{
     body::Body,
@@ -34,16 +35,25 @@ use tracing::info;
 
 pub use handlers::*;
 
-pub struct GatewayState {
+pub const MAX_SESSIONS: usize = 128;
+
+pub struct SessionSlot {
     pub agent: Arc<Mutex<Agent>>,
+    pub last_used: Instant,
+}
+
+pub struct GatewayState {
+    pub sessions: Arc<Mutex<HashMap<String, SessionSlot>>>,
     pub config: Config,
+    pub memory: Option<Arc<SqliteMemory>>,
 }
 
 impl Clone for GatewayState {
     fn clone(&self) -> Self {
         Self {
-            agent: Arc::clone(&self.agent),
+            sessions: Arc::clone(&self.sessions),
             config: self.config.clone(),
+            memory: self.memory.clone(),
         }
     }
 }
@@ -137,11 +147,19 @@ async fn auth_middleware(
 
 pub async fn run(host: &str, port: u16, config_path: &PathBuf) -> Result<()> {
     let config = Config::load_or_default_from(config_path)?;
-    let agent = Agent::new(config.clone())?;
+    let memory_path = config_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("memory.db");
+    if let Some(parent) = memory_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let memory = SqliteMemory::new(memory_path).map_err(anyhow::Error::msg)?;
 
     let state = GatewayState {
-        agent: Arc::new(Mutex::new(agent)),
+        sessions: Arc::new(Mutex::new(HashMap::new())),
         config: config.clone(),
+        memory: Some(Arc::new(memory)),
     };
 
     let (max_requests, window_secs) = config
