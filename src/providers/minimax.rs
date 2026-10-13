@@ -2,6 +2,7 @@ use super::traits::{Message, Provider, ProviderError, Response, ToolCall};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 #[derive(Debug, Serialize)]
 struct MiniMaxRequest {
@@ -66,8 +67,13 @@ pub struct MiniMaxProvider {
 impl MiniMaxProvider {
     pub fn new(api_key: String, model: String, temperature: f64) -> Self {
         let base_url = "https://api.minimax.chat/v1".to_string();
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(60))
+            .build()
+            .unwrap_or_else(|_| Client::new());
         Self {
-            client: Client::new(),
+            client,
             api_key,
             model,
             temperature,

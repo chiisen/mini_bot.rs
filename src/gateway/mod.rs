@@ -21,6 +21,7 @@ use axum::{
 use std::{
     collections::HashMap,
     net::SocketAddr,
+    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -68,8 +69,12 @@ impl RateLimiter {
         let now = Instant::now();
         let window = Duration::from_secs(self.window_secs);
 
+        requests.retain(|_, timestamps| {
+            timestamps.retain(|t| now.duration_since(*t) < window);
+            !timestamps.is_empty()
+        });
+
         let timestamps = requests.entry(key.to_string()).or_insert_with(Vec::new);
-        timestamps.retain(|t| now.duration_since(*t) < window);
 
         if timestamps.len() >= self.max_requests {
             return false;
@@ -130,8 +135,8 @@ async fn auth_middleware(
     next.run(request).await
 }
 
-pub async fn run(host: &str, port: u16) -> Result<()> {
-    let config = Config::load_or_default()?;
+pub async fn run(host: &str, port: u16, config_path: &PathBuf) -> Result<()> {
+    let config = Config::load_or_default_from(config_path)?;
     let agent = Agent::new(config.clone())?;
 
     let state = GatewayState {

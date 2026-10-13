@@ -81,10 +81,18 @@ impl Default for Config {
 
 impl Config {
     pub fn load_or_default() -> anyhow::Result<Self> {
-        let path = Self::default_path();
+        Self::load_or_default_from(&Self::default_path())
+    }
+
+    /// 檔案不存在時用預設值。檔案存在但讀取或解析失敗時回傳錯誤。
+    pub fn load_or_default_from(path: &PathBuf) -> anyhow::Result<Self> {
         if path.exists() {
-            Self::load(&path).or_else(|_| Ok(Self::default()))
+            Self::load(path)
         } else {
+            tracing::info!(
+                "config file not found at {}, using defaults",
+                path.display()
+            );
             Ok(Self::default())
         }
     }
@@ -201,6 +209,25 @@ mod tests {
         let loaded = Config::load(&path).unwrap();
         assert_eq!(loaded.version, config.version);
         assert_eq!(loaded.default_provider, config.default_provider);
+    }
+
+    #[test]
+    fn test_invalid_config_is_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("config.toml");
+        std::fs::write(&path, "this is not toml {{{").unwrap();
+
+        let err = Config::load_or_default_from(&path).unwrap_err();
+        assert!(err.to_string().len() > 0);
+    }
+
+    #[test]
+    fn test_missing_config_uses_default() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("config.toml");
+
+        let loaded = Config::load_or_default_from(&path).unwrap();
+        assert_eq!(loaded.version, Config::default().version);
     }
 
     #[test]

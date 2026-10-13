@@ -1,24 +1,30 @@
 //! Gateway request handlers
 
 use crate::gateway::GatewayState;
-use crate::i18n::tr_with_args;
-use axum::{extract::State, response::Json};
+use crate::i18n::{tr, tr_with_args};
+use axum::http::StatusCode;
+use axum::{extract::State, response::IntoResponse, response::Json};
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 use tracing::{error, info};
 
+static SENSITIVE_LOG_RES: LazyLock<Vec<(regex::Regex, String)>> = LazyLock::new(|| {
+    ["api_key", "password", "token", "secret", "credential"]
+        .into_iter()
+        .filter_map(|key| {
+            let pattern = format!(r#""{}"\s*:\s*"[^"]*"#, key);
+            regex::Regex::new(&pattern)
+                .ok()
+                .map(|re| (re, format!(r#""{}":"***""#, key)))
+        })
+        .collect()
+});
+
 fn sanitize_for_log(s: &str) -> String {
-    let sensitive_keys = ["api_key", "password", "token", "secret", "credential"];
     let mut result = s.to_string();
-
-    for key in sensitive_keys {
-        let pattern = format!(r#""{}"\s*:\s*"[^"]*"#, key);
-        if let Ok(re) = regex::Regex::new(&pattern) {
-            result = re
-                .replace_all(&result, format!(r#""{}":"***"#, key))
-                .to_string();
-        }
+    for (re, replacement) in SENSITIVE_LOG_RES.iter() {
+        result = re.replace_all(&result, replacement.as_str()).to_string();
     }
-
     result
 }
 
@@ -54,7 +60,7 @@ pub async fn health_handler() -> Json<HealthResponse> {
 pub async fn webhook_handler(
     State(state): State<GatewayState>,
     Json(payload): Json<WebhookRequest>,
-) -> Json<WebhookResponse> {
+) -> impl IntoResponse {
     let sanitized_message = sanitize_for_log(&payload.message);
     info!(
         "{}",
@@ -74,17 +80,25 @@ pub async fn webhook_handler(
                 "{}",
                 tr_with_args("gateway.agent_response", &[&sanitized_response])
             );
-            Json(WebhookResponse {
-                response,
-                session_id: Some(session_id),
-            })
+            (
+                StatusCode::OK,
+                Json(WebhookResponse {
+                    response,
+                    session_id: Some(session_id),
+                }),
+            )
+                .into_response()
         }
         Err(e) => {
             error!("{}", tr_with_args("gateway.agent_error", &[&e.to_string()]));
-            Json(WebhookResponse {
-                response: tr_with_args("error.prefix", &[&e.to_string()]),
-                session_id: Some(session_id),
-            })
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(WebhookResponse {
+                    response: tr("gateway.agent_error_public"),
+                    session_id: Some(session_id),
+                }),
+            )
+                .into_response()
         }
     }
 }

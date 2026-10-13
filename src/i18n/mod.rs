@@ -34,6 +34,10 @@ static TRANSLATIONS: LazyLock<HashMap<&'static str, HashMap<&'static str, &'stat
         en.insert("gateway.webhook_received", "Received webhook request: {}");
         en.insert("gateway.agent_response", "Agent response: {}");
         en.insert("gateway.agent_error", "Agent error: {}");
+        en.insert(
+            "gateway.agent_error_public",
+            "Agent failed to handle the request",
+        );
         m.insert("en", en);
 
         let mut zh_tw = HashMap::new();
@@ -59,6 +63,7 @@ static TRANSLATIONS: LazyLock<HashMap<&'static str, HashMap<&'static str, &'stat
         zh_tw.insert("gateway.webhook_received", "收到 Webhook 請求：{}");
         zh_tw.insert("gateway.agent_response", "Agent 回應：{}");
         zh_tw.insert("gateway.agent_error", "Agent 錯誤：{}");
+        zh_tw.insert("gateway.agent_error_public", "Agent 無法處理此請求");
         m.insert("zh-tw", zh_tw);
 
         let mut zh_cn = HashMap::new();
@@ -84,6 +89,7 @@ static TRANSLATIONS: LazyLock<HashMap<&'static str, HashMap<&'static str, &'stat
         zh_cn.insert("gateway.webhook_received", "收到 Webhook 请求：{}");
         zh_cn.insert("gateway.agent_response", "Agent 回应：{}");
         zh_cn.insert("gateway.agent_error", "Agent 错误：{}");
+        zh_cn.insert("gateway.agent_error_public", "Agent 无法处理此请求");
         m.insert("zh-cn", zh_cn);
 
         m

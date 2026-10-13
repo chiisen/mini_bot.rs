@@ -7,8 +7,11 @@ use crate::providers::create_provider;
 use crate::providers::{Message, Provider, ToolCall};
 use crate::tools::{FileTool, ShellTool, Tool, ToolResult};
 use anyhow::Result;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+const MAX_TOOL_OUTPUT_CHARS: usize = 8 * 1024;
 
 pub struct Agent {
     provider: Arc<dyn Provider>,
@@ -17,6 +20,7 @@ pub struct Agent {
     #[allow(dead_code)]
     memory: Option<SqliteMemory>,
     config: Config,
+    tool_definitions: Vec<serde_json::Value>,
     start_time: Option<Instant>,
 }
 
@@ -45,12 +49,18 @@ impl Agent {
             )),
         ];
 
+        let tool_definitions = tools
+            .iter()
+            .map(|t| serde_json::to_value(t.definition()).unwrap_or(serde_json::Value::Null))
+            .collect();
+
         Ok(Self {
             provider,
             tools,
             history: history::History::new(config.agent.max_history_messages),
             memory: None,
             config,
+            tool_definitions,
             start_time: None,
         })
     }
@@ -72,12 +82,6 @@ impl Agent {
                 ));
             }
         }
-
-        let tool_definitions: Vec<serde_json::Value> = self
-            .tools
-            .iter()
-            .map(|t| serde_json::to_value(t.definition()).unwrap())
-            .collect();
 
         let max_iterations = self.config.agent.max_tool_iterations;
         let mut tool_iterations = 0;
@@ -103,7 +107,7 @@ impl Agent {
                 .provider
                 .chat(
                     self.history.messages().to_vec(),
-                    Some(tool_definitions.clone()),
+                    Some(self.tool_definitions.clone()),
                 )
                 .await?;
 
@@ -118,16 +122,17 @@ impl Agent {
                         .await
                         .map_err(anyhow::Error::msg)?;
 
+                    let body = if result.success {
+                        result.output
+                    } else {
+                        result.error.unwrap_or_default()
+                    };
                     self.history.add_message(Message {
                         role: "tool".to_string(),
                         content: format!(
                             "Tool {} result: {}",
                             tool_call.name,
-                            if result.success {
-                                result.output
-                            } else {
-                                result.error.unwrap_or_default()
-                            }
+                            truncate_chars(&body, MAX_TOOL_OUTPUT_CHARS)
                         ),
                     });
                 }
@@ -148,8 +153,16 @@ impl Agent {
     }
 }
 
-pub async fn run(message: Option<String>) -> Result<()> {
-    let config = Config::load_or_default()?;
+fn truncate_chars(input: &str, max_chars: usize) -> String {
+    if input.chars().count() <= max_chars {
+        return input.to_string();
+    }
+    let truncated: String = input.chars().take(max_chars).collect();
+    format!("{truncated}\n...[truncated]")
+}
+
+pub async fn run(message: Option<String>, config_path: &PathBuf) -> Result<()> {
+    let config = Config::load_or_default_from(config_path)?;
 
     let mut agent = Agent::new(config)?;
 
@@ -160,14 +173,18 @@ pub async fn run(message: Option<String>) -> Result<()> {
         println!("{}", tr("agent.started"));
 
         use std::io::{self, Write};
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        let mut lines = BufReader::new(tokio::io::stdin()).lines();
         loop {
             print!("> ");
             io::stdout().flush()?;
 
-            let mut input = String::new();
-            io::stdin().read_line(&mut input)?;
+            let Some(line) = lines.next_line().await? else {
+                break;
+            };
 
-            let input = input.trim();
+            let input = line.trim();
             if input == "exit" {
                 break;
             }

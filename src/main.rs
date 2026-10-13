@@ -1,9 +1,11 @@
 use mini_bot_rs::agent;
+use mini_bot_rs::config::Config;
 use mini_bot_rs::gateway;
 use mini_bot_rs::i18n::{tr, tr_with_args};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -44,11 +46,15 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set tracing subscriber");
 
     let cli = Cli::parse();
+    let config_path = match cli.config_dir {
+        Some(dir) => PathBuf::from(dir).join("config.toml"),
+        None => Config::default_path(),
+    };
 
     match cli.command {
         Commands::Agent { message } => {
             info!("{}", tr("app.starting_agent"));
-            agent::run(message).await?;
+            agent::run(message, &config_path).await?;
         }
         Commands::Gateway { port, host } => {
             let port = port.unwrap_or(3000);
@@ -57,7 +63,7 @@ async fn main() -> Result<()> {
                 "{}",
                 tr_with_args("app.starting_gateway", &[&host, &port.to_string()])
             );
-            gateway::run(&host, port).await?;
+            gateway::run(&host, port, &config_path).await?;
         }
         Commands::Version => {
             let version = env!("CARGO_PKG_VERSION");
