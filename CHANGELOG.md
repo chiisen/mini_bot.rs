@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MiniMax HTTP client 設定連線逾時 10 秒、請求逾時 60 秒
 - 互動模式改為非阻塞讀取標準輸入
 - Gateway 速率限制會清掉已無請求紀錄的 IP
+- Gateway HTTP 逾時改為 `agent.max_execution_time_secs`；逾時會取消該次 `chat`，不讓同一個 session 繼續占著鎖
 - Gateway 依 `session_id` 分開 Agent，鎖不再包住整段對話
 - CORS 改讀 `gateway_security.allowed_origins`，不再固定允許任意來源
 - 對話歷史寫入 SQLite，同一 session 重啟後可恢復，並仍受歷史筆數上限

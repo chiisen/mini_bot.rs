@@ -38,6 +38,10 @@ pub use handlers::*;
 
 pub const MAX_SESSIONS: usize = 128;
 
+pub(crate) fn request_timeout(config: &Config) -> Duration {
+    Duration::from_secs(config.agent.max_execution_time_secs)
+}
+
 pub(crate) fn allows_any_origin(origins: Option<&[String]>) -> bool {
     match origins {
         None => true,
@@ -206,7 +210,7 @@ pub async fn run(host: &str, port: u16, config_path: &PathBuf) -> Result<()> {
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
-            std::time::Duration::from_secs(30),
+            request_timeout(&config),
         ))
         .layer(TraceLayer::new_for_http())
         .route_layer(axum::middleware::from_fn_with_state(
@@ -238,6 +242,13 @@ mod tests {
     use axum::body::Body;
     use axum::routing::get;
     use tower::ServiceExt;
+
+    #[test]
+    fn http_timeout_follows_agent_limit() {
+        let mut config = Config::default();
+        config.agent.max_execution_time_secs = 12;
+        assert_eq!(request_timeout(&config), Duration::from_secs(12));
+    }
 
     #[test]
     fn specific_origins_do_not_use_any() {

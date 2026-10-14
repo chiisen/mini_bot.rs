@@ -90,9 +90,10 @@ pub async fn webhook_handler(
     };
 
     let mut agent = agent.lock().await;
+    let limit = crate::gateway::request_timeout(&state.config);
 
-    match agent.chat(&payload.message).await {
-        Ok(response) => {
+    match chat_within_limit(&mut agent, &payload.message, limit).await {
+        Ok(Ok(response)) => {
             let sanitized_response = sanitize_for_log(&response);
             info!(
                 "{}",
@@ -107,7 +108,7 @@ pub async fn webhook_handler(
             )
                 .into_response()
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             error!("{}", tr_with_args("gateway.agent_error", &[&e.to_string()]));
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -118,7 +119,26 @@ pub async fn webhook_handler(
             )
                 .into_response()
         }
+        Err(_) => {
+            error!("{}", tr("gateway.request_timeout"));
+            (
+                StatusCode::REQUEST_TIMEOUT,
+                Json(WebhookResponse {
+                    response: tr("gateway.request_timeout_public"),
+                    session_id: Some(session_id),
+                }),
+            )
+                .into_response()
+        }
     }
+}
+
+async fn chat_within_limit(
+    agent: &mut Agent,
+    message: &str,
+    limit: std::time::Duration,
+) -> Result<anyhow::Result<String>, tokio::time::error::Elapsed> {
+    tokio::time::timeout(limit, agent.chat(message)).await
 }
 
 async fn session_agent(
@@ -253,5 +273,55 @@ mod tests {
         assert!(!sessions.contains_key("s0"));
         assert!(sessions.contains_key("s1"));
         assert!(sessions.contains_key("newest"));
+    }
+
+    #[tokio::test]
+    async fn timed_out_chat_does_not_keep_running() {
+        use crate::providers::{Message, Provider, ProviderError, Response, ToolCall};
+        use async_trait::async_trait;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        #[derive(Debug)]
+        struct HangProvider {
+            finished: Arc<AtomicBool>,
+        }
+
+        #[async_trait]
+        impl Provider for HangProvider {
+            fn name(&self) -> &str {
+                "hang"
+            }
+
+            async fn chat(
+                &self,
+                _messages: Vec<Message>,
+                _tools: Option<Vec<serde_json::Value>>,
+            ) -> Result<Response, ProviderError> {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                self.finished.store(true, Ordering::SeqCst);
+                Ok(Response {
+                    message: Message {
+                        role: "assistant".to_string(),
+                        content: "late".to_string(),
+                    },
+                    tool_calls: Vec::<ToolCall>::new(),
+                })
+            }
+
+            async fn health_check(&self) -> Result<(), ProviderError> {
+                Ok(())
+            }
+        }
+
+        let finished = Arc::new(AtomicBool::new(false));
+        let mut agent = Agent::new(Config::default()).unwrap();
+        agent.set_provider(Arc::new(HangProvider {
+            finished: Arc::clone(&finished),
+        }));
+
+        let result = chat_within_limit(&mut agent, "hi", Duration::from_millis(30)).await;
+        assert!(result.is_err());
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(!finished.load(Ordering::SeqCst));
     }
 }

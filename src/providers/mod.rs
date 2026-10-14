@@ -2,7 +2,7 @@ mod minimax;
 mod traits;
 
 pub use minimax::MiniMaxProvider;
-pub use traits::{Message, Provider, ToolCall};
+pub use traits::{Message, Provider, ProviderError, Response, ToolCall};
 
 use std::sync::Arc;
 

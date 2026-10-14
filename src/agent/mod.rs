@@ -72,6 +72,11 @@ impl Agent {
         })
     }
 
+    #[cfg(test)]
+    pub fn set_provider(&mut self, provider: Arc<dyn Provider>) {
+        self.provider = provider;
+    }
+
     pub fn bind_session(&mut self, memory: Arc<SqliteMemory>, session_id: String) {
         self.memory = Some(memory);
         self.session_id = Some(session_id);
