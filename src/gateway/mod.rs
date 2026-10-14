@@ -27,7 +27,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{Mutex, RwLock};
-use tower_http::cors::{Any, CorsLayer};
+use axum::http::HeaderValue;
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
@@ -36,6 +37,26 @@ use tracing::info;
 pub use handlers::*;
 
 pub const MAX_SESSIONS: usize = 128;
+
+pub(crate) fn allows_any_origin(origins: Option<&[String]>) -> bool {
+    match origins {
+        None => true,
+        Some(list) => list.is_empty() || list.iter().any(|origin| origin == "*"),
+    }
+}
+
+pub(crate) fn cors_layer_for(origins: Option<&[String]>) -> CorsLayer {
+    let layer = CorsLayer::new().allow_methods(Any).allow_headers(Any);
+    if allows_any_origin(origins) {
+        return layer.allow_origin(Any);
+    }
+
+    let allowed = origins
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|origin| HeaderValue::from_str(origin).ok());
+    layer.allow_origin(AllowOrigin::list(allowed))
+}
 
 pub struct SessionSlot {
     pub agent: Arc<Mutex<Agent>>,
@@ -170,10 +191,12 @@ pub async fn run(host: &str, port: u16, config_path: &PathBuf) -> Result<()> {
 
     let rate_limiter = RateLimiter::new(max_requests, window_secs);
 
-    let cors_layer = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    let cors_layer = cors_layer_for(
+        config
+            .gateway_security
+            .as_ref()
+            .map(|security| security.allowed_origins.as_slice()),
+    );
 
     let app = Router::new()
         .route("/", get(root_handler))
@@ -207,4 +230,48 @@ pub async fn run(host: &str, port: u16, config_path: &PathBuf) -> Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::routing::get;
+    use tower::ServiceExt;
+
+    #[test]
+    fn specific_origins_do_not_use_any() {
+        assert!(!allows_any_origin(Some(&[
+            "https://example.com".to_string()
+        ])));
+        assert!(allows_any_origin(Some(&["*".to_string()])));
+        assert!(allows_any_origin(Some(&[])));
+        assert!(allows_any_origin(None));
+    }
+
+    #[tokio::test]
+    async fn configured_origin_is_echoed() {
+        let app = Router::new()
+            .route("/", get(|| async { "ok" }))
+            .layer(cors_layer_for(Some(&[
+                "https://example.com".to_string()
+            ])));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header("origin", "https://example.com")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .unwrap(),
+            "https://example.com"
+        );
+    }
 }
