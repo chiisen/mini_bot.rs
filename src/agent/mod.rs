@@ -229,6 +229,117 @@ fn session_memory_id(session_id: &str) -> String {
     format!("sess_{safe}")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::memory::SqliteMemory;
+    use crate::providers::{ProviderError, Response, ToolCall};
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Debug)]
+    struct ScriptedProvider {
+        step: AtomicUsize,
+        delay: Duration,
+    }
+
+    #[async_trait]
+    impl Provider for ScriptedProvider {
+        fn name(&self) -> &str {
+            "scripted"
+        }
+
+        async fn chat(
+            &self,
+            _messages: Vec<Message>,
+            _tools: Option<Vec<serde_json::Value>>,
+        ) -> Result<Response, ProviderError> {
+            if !self.delay.is_zero() {
+                tokio::time::sleep(self.delay).await;
+            }
+            let step = self.step.fetch_add(1, Ordering::SeqCst);
+            if step == 0 {
+                Ok(Response {
+                    message: Message {
+                        role: "assistant".to_string(),
+                        content: "calling".to_string(),
+                    },
+                    tool_calls: vec![ToolCall {
+                        name: "shell".to_string(),
+                        arguments: r#"{"command":"echo hi"}"#.to_string(),
+                    }],
+                })
+            } else {
+                Ok(Response {
+                    message: Message {
+                        role: "assistant".to_string(),
+                        content: "done".to_string(),
+                    },
+                    tool_calls: Vec::new(),
+                })
+            }
+        }
+
+        async fn health_check(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn chat_runs_tool_then_returns_text_and_saves_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let memory = Arc::new(SqliteMemory::new(dir.path().join("memory.db")).unwrap());
+        let mut agent = Agent::new(Config::default()).unwrap();
+        agent.bind_session(Arc::clone(&memory), "chat".to_string());
+        agent.set_provider(Arc::new(ScriptedProvider {
+            step: AtomicUsize::new(0),
+            delay: Duration::ZERO,
+        }));
+
+        let reply = agent.chat("hello").await.unwrap();
+        assert_eq!(reply, "done");
+        let saved = agent.history_snapshot();
+        assert!(saved.iter().any(|message| message.role == "tool"));
+        assert!(saved.iter().any(|message| message.content == "done"));
+
+        let mut restored = Agent::new(Config::default()).unwrap();
+        restored.bind_session(memory, "chat".to_string());
+        restored.load_history().await.unwrap();
+        let loaded = restored.history_snapshot();
+        assert!(loaded.iter().any(|message| message.content == "done"));
+        assert!(loaded.iter().any(|message| message.role == "tool"));
+    }
+
+    #[tokio::test]
+    async fn chat_stops_at_tool_iteration_limit() {
+        let mut config = Config::default();
+        config.agent.max_tool_iterations = 1;
+        let mut agent = Agent::new(config).unwrap();
+        agent.set_provider(Arc::new(ScriptedProvider {
+            step: AtomicUsize::new(0),
+            delay: Duration::ZERO,
+        }));
+
+        let error = agent.chat("loop").await.unwrap_err();
+        assert!(error.to_string().contains('1'));
+    }
+
+    #[tokio::test]
+    async fn chat_stops_when_execution_time_is_exceeded() {
+        let mut config = Config::default();
+        config.agent.max_execution_time_secs = 1;
+        config.agent.max_tool_iterations = 5;
+        let mut agent = Agent::new(config).unwrap();
+        agent.set_provider(Arc::new(ScriptedProvider {
+            step: AtomicUsize::new(0),
+            delay: Duration::from_millis(1100),
+        }));
+
+        let error = agent.chat("slow").await.unwrap_err();
+        assert!(error.to_string().contains('1'));
+    }
+}
+
 fn truncate_chars(input: &str, max_chars: usize) -> String {
     if input.chars().count() <= max_chars {
         return input.to_string();

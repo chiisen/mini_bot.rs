@@ -243,6 +243,110 @@ mod tests {
     use axum::routing::get;
     use tower::ServiceExt;
 
+    fn protected_app(config: Config, max_requests: usize) -> Router {
+        let state = GatewayState {
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            config,
+            memory: None,
+        };
+        let limiter = RateLimiter::new(max_requests, 60);
+        Router::new()
+            .route("/health", get(|| async { "ok" }))
+            .route_layer(axum::middleware::from_fn_with_state(
+                limiter,
+                rate_limit_middleware,
+            ))
+            .route_layer(axum::middleware::from_fn_with_state(state, auth_middleware))
+    }
+
+    fn config_with_security(api_key: &str, allowed_ips: Vec<String>, limit: usize) -> Config {
+        let mut config = Config::default();
+        config.gateway_security = Some(crate::config::GatewaySecurityConfig {
+            api_key: api_key.to_string(),
+            rate_limit_requests: limit,
+            rate_limit_window_secs: 60,
+            allowed_origins: vec!["*".to_string()],
+            allowed_ips,
+        });
+        config
+    }
+
+    async fn status_from(app: Router, ip: [u8; 4], api_key: Option<&str>) -> StatusCode {
+        use axum::extract::connect_info::MockConnectInfo;
+        let mut request = Request::builder().uri("/health");
+        if let Some(key) = api_key {
+            request = request.header("x-api-key", key);
+        }
+        let response = app
+            .layer(MockConnectInfo(SocketAddr::from((ip, 9))))
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        response.status()
+    }
+
+    #[tokio::test]
+    async fn rejects_missing_or_wrong_api_key() {
+        let config = config_with_security("secret", vec![], 10);
+        let missing = status_from(protected_app(config.clone(), 10), [203, 0, 113, 1], None).await;
+        let wrong = status_from(
+            protected_app(config, 10),
+            [203, 0, 113, 1],
+            Some("nope"),
+        )
+        .await;
+        assert_eq!(missing, StatusCode::UNAUTHORIZED);
+        assert_eq!(wrong, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn rejects_ip_outside_allowlist() {
+        let config = config_with_security("", vec!["203.0.113.9".to_string()], 10);
+        let status = status_from(protected_app(config, 10), [203, 0, 113, 1], None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn allows_matching_ip_and_api_key() {
+        let config = config_with_security("secret", vec!["203.0.113.9".to_string()], 10);
+        let status = status_from(
+            protected_app(config, 10),
+            [203, 0, 113, 9],
+            Some("secret"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn rate_limit_returns_too_many_requests() {
+        let config = config_with_security("", vec![], 1);
+        let app = protected_app(config, 1).layer(axum::extract::connect_info::MockConnectInfo(
+            SocketAddr::from(([203, 0, 113, 5], 9)),
+        ));
+        let first = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let second = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
     #[test]
     fn http_timeout_follows_agent_limit() {
         let mut config = Config::default();
