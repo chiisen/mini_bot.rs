@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 更新 `docs/SECURITY_TODO.md` 與 `docs/mini_bot-mvp-guide.md` 裡已完成卻仍標成待辦的項目
 - 停用 Aider 與 grepai 指南並備份到 `docs/archive/`。自我升級評估改寫設定變更需重啟，避免讀成熱重載
 - MVP 建置指南改以 `src/` 為準，並移除會允許所有命令、透過 `sh -c` 執行的 Shell 舊草稿
+- MVP 建置指南改為現況說明，並判斷舊的未來清單哪些不做
 - README 說明 `config` 用來查看合併環境變數後的有效設定，以及寫出不含金鑰的範例
 - Agent 工具迭代次數限制（使用 `max_tool_iterations` 配置）
 - `--config-dir` 會載入該目錄的 `config.toml`；檔案存在但解析失敗時直接報錯
