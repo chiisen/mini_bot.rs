@@ -20,7 +20,7 @@ Release 建置使用 `opt-level = "z"`、全程式 LTO 與 `strip = true`，目�
 ```bash
 mini_bot.rs agent      # 啟動互動式對話
 mini_bot.rs gateway   # 啟動 Webhook 閘道伺服器
-mini_bot.rs config    # 配置管理
+mini_bot.rs config    # 查看合併後的有效設定，或寫出範例
 ```
 
 ### 核心工具集
@@ -96,6 +96,12 @@ cargo run -- config example --output ./config.toml
 ```
 
 ## 設定檔
+
+`config` 用來確認程式實際採用的設定，不會改動既有檔案。
+
+- `config` 與 `config show` 讀取設定檔，再套用環境變數，印出 provider、Gateway、歷史上限、檔案與 Shell 限制。API key 只顯示來源：`MINIBOT_API_KEY`、`MINIMAX_API_KEY`、`MINIBOT_GATEWAY_API_KEY`、設定檔、設定檔（已加密）或未設定。`MINIBOT_API_KEY` 優先於 `MINIMAX_API_KEY`，兩者都優先於設定檔。
+- `config example` 印出不含金鑰的範例。加上 `--output` 時寫入該路徑；檔案已存在則拒絕覆寫。
+- 設定檔不存在時，`show` 顯示內建預設值。Gateway 安全設定的區段名稱是 `[gateway_security]`。
 
 建立 `config.toml` 檔案並放置於：
 
