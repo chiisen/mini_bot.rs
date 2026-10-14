@@ -106,6 +106,8 @@ cargo --version
 
 ## 📦 建立 MVP 專案步驟
 
+以下步驟裡的程式片段是早期草稿，可能和現在的 `src/` 不一致。實作以 `src/` 為準，不要把這裡的範例直接貼進專案。Shell 的現行行為見下一節，不以本文件的舊範例為準。
+
 ### 步驟 1：建立新 Rust 專案
 
 ```bash
@@ -909,148 +911,19 @@ pub trait Tool: Send + Sync {
 }
 ```
 
-#### 5.2 建立 tools/shell.rs（Shell 工具）
+#### 5.2 Shell 工具
 
-```rust
-//! Shell 工具實作
-//! 
-//! 這個工具允許 Agent 執行系統命令。
-//! 注意：出於安全考量，應該限制可執行的命令。
+現行實作在 `src/tools/shell.rs`。重點：
 
-use super::traits::{Tool, ToolArgument, ToolDefinition, ToolResult};
-use async_trait::async_trait;
-use std::process::Command;
+- 只執行白名單中的程式名稱，不透過 `sh -c`。
+- 白名單為空時拒絕所有命令。比對的是程式名稱，不是 `starts_with`。
+- 單引號與雙引號內的空白會保留。含有 shell 元字元或換行的命令會拒絕。
+- 預設逾時 30 秒。
 
-/// Shell 工具
-/// 
-/// 允許執行系統命令的工具。
-/// 在 production 環境中應該實施嚴格的白名單限制。
-pub struct ShellTool {
-    /// 允許的命令白名單（空表示允許所有）
-    allowed_commands: Vec<String>,
-}
-
-impl ShellTool {
-    /// 建立新的 Shell 工具
-    pub fn new() -> Self {
-        Self {
-            allowed_commands: vec![],
-        }
-    }
-
-    /// 建立帶有白名單的 Shell 工具
-    pub fn with_allowed(commands: Vec<String>) -> Self {
-        Self {
-            allowed_commands: commands,
-        }
-    }
-
-    /// 檢查命令是否允許執行
-    fn is_command_allowed(&self, cmd: &str) -> bool {
-        // 如果白名單為空，允許所有命令
-        if self.allowed_commands.is_empty() {
-            return true;
-        }
-
-        // 檢查命令是否在白名單中
-        self.allowed_commands
-            .iter()
-            .any(|allowed| cmd.starts_with(allowed))
-    }
-}
-
-impl Default for ShellTool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl Tool for ShellTool {
-    /// 工具名稱
-    fn name(&self) -> &str {
-        "shell"
-    }
-
-    /// 工具定義
-    fn definition(&self) -> ToolDefinition {
-        ToolDefinition {
-            name: "shell".to_string(),
-            description: "執行系統命令".to_string(),
-            arguments: vec![ToolArgument {
-                name: "command".to_string(),
-                arg_type: "string".to_string(),
-                required: true,
-                description: "要執行的命令".to_string(),
-            }],
-        }
-    }
-
-    /// 執行命令
-    async fn execute(&self, arguments: &str) -> Result<ToolResult, String> {
-        // 解析參數
-        let args: serde_json::Value = serde_json::from_str(arguments)
-            .map_err(|e| format!("參數解析失敗: {}", e))?;
-
-        let command = args["command"]
-            .as_str()
-            .ok_or("缺少 'command' 參數")?;
-
-        // 安全檢查：檢查命令是否允許執行
-        if !self.is_command_allowed(command) {
-            return Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(format!("命令 '{}' 不在允許列表中", command)),
-            });
-        }
-
-        // 在 Unix 系統上使用 sh -c，在 Windows 上使用 cmd /c
-        #[cfg(unix)]
-        let output = Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .output();
-
-        #[cfg(windows)]
-        let output = Command::new("cmd")
-            .args(["/C", command])
-            .output();
-
-        match output {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-                if output.status.success() {
-                    Ok(ToolResult {
-                        success: true,
-                        output: stdout,
-                        error: if stderr.is_empty() {
-                            None
-                        } else {
-                            Some(stderr)
-                        },
-                    })
-                } else {
-                    Ok(ToolResult {
-                        success: false,
-                        output: stdout,
-                        error: Some(stderr),
-                    })
-                }
-            }
-            Err(e) => Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(format!("命令執行失敗: {}", e)),
-            }),
-        }
-    }
-}
-```
+舊草稿曾寫成「白名單為空就允許所有命令」，並用 `sh -c` 執行整段字串。那段已經移除，避免被複製進專案。
 
 ### 步驟 6：建立 Memory 模組
+
 
 #### 6.1 建立 memory/sqlite.rs（SQLite 後端）
 
