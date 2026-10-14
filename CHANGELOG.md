@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README 補上 Gateway、歷史裁切、逾時、CORS、檔案根目錄與 Shell 白名單的說明，範例設定與 `config.example.toml` 對齊
 - README 說明小於 5MB、冷啟動小於 10ms 是尚未量測的目標，Release 設定是為了縮小執行檔
 - README 記錄 release `version` 的啟動時間與記憶體量測。常駐記憶體約 7.5MB，未達到 5MB 目標
+- README 記錄 Gateway 剛開始聽 port 的 RSS 約 6.1MB，請求後約 7.2MB，高於 5MB 目標
 - 更新 `docs/SECURITY_TODO.md` 與 `docs/mini_bot-mvp-guide.md` 裡已完成卻仍標成待辦的項目
 - 停用 Aider 與 grepai 指南並備份到 `docs/archive/`。自我升級評估改寫設定變更需重啟，避免讀成熱重載
 - MVP 建置指南改以 `src/` 為準，並移除會允許所有命令、透過 `sh -c` 執行的 Shell 舊草稿

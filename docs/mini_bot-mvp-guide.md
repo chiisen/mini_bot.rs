@@ -6,7 +6,7 @@
 
 MiniBot 是一個用 **100% Rust** 實作的高效能 AI Agent 執行框架。其設計目標是：
 
-- **小執行環境**：目標是執行時期記憶體小於 5MB、冷啟動小於 10ms。2026-10-14 以 release 的 `version` 量測，常駐記憶體約 7.5MB，未達到 5MB；暖機後啟動中位數約 3.9ms。詳見 README。
+- **小執行環境**：目標是執行時期記憶體小於 5MB、冷啟動小於 10ms。2026-10-14 的 release 量測見 README：`version` 的常駐集約 7.5MB，Gateway 剛開始聽 port 的 RSS 約 6.1MB，請求後約 7.2MB。都未達到 5MB。
 - **高度模組化**：透過 Trait 驅動的架構，所有元件皆可替換
 - **跨平台**：支援 ARM、x86、RISC-V 架構
 - **安全預設**：嚴格的沙箱隔離、明確的白名單
@@ -140,7 +140,7 @@ MVP 檢查清單都已完成。下面這些不是待辦，是對舊清單的取�
 
 ### 已開 issue、尚未做
 
-- [Gateway 常駐記憶體尚未量測](https://github.com/chiisen/mini_bot.rs/issues/14)。小於 5MB 的目標只量過 `version`。
+- [Gateway 常駐記憶體](https://github.com/chiisen/mini_bot.rs/issues/14)已量過，RSS 約 6.1MB 至 7.2MB，高於 5MB。數字見 README。
 - [`SqliteMemory::sanitize_string` 沒有人呼叫](https://github.com/chiisen/mini_bot.rs/issues/15)。`validate_id` 已檢查 id。
 
 ---

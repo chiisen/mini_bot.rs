@@ -4,7 +4,9 @@
 
 ## 特性
 
-- **小執行環境**：目標是執行時期記憶體小於 5MB、冷啟動小於 10ms。2026-10-14 在這台 Apple Silicon Mac 上，以 release 建置的 `mini_bot_rs version` 量過：執行檔約 4.6MB；`/usr/bin/time -l` 的 maximum resident set size 約 7.2–7.5MB，未達到 5MB。同一次的 peak memory footprint 約 2.4MB。第一次啟動約 300ms，之後 10 次的中位數約 3.9ms。這只代表 `version` 子命令，不代表載入模型或開啟 Gateway。
+- **小執行環境**：目標是執行時期記憶體小於 5MB、冷啟動小於 10ms。2026-10-14 在這台 Apple Silicon Mac 上，以 release 建置量過，兩項記憶體都高於 5MB：
+  - `mini_bot_rs version`：執行檔約 4.6MB。`/usr/bin/time -l` 的 maximum resident set size 約 7.2–7.5MB，peak memory footprint 約 2.4MB。第一次啟動約 300ms，之後 10 次的中位數約 3.9ms。
+  - `gateway` 聽在 `127.0.0.1:18765`、使用預設設定：`ps` 的 RSS 在剛開始聽 port 時約 6.1MB（6288KB），對 `GET /health` 之後約 7.2MB（7408KB）。該請求回 HTTP 500，因為 `axum::serve` 沒有帶上 `ConnectInfo`，認證中介層讀不到客戶端位址。這不是成功的 webhook 往返。
 - **高度模組化**：透過 Trait 驅動的架構，所有元件皆可替換
 - **跨平台**：支援 ARM、x86、RISC-V 架構
 - **安全預設**：Shell 只執行白名單中的程式名稱，檔案工具預設限制在允許根目錄內
