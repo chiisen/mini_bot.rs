@@ -47,7 +47,8 @@
 **變更**:
 - 新增 `MAX_FILE_SIZE` 常量 (10MB)
 - 新增 `FileTool::with_config()` 方法
-- 空 `allowed_directory` 時預設返回 `false` (拒絕所有)
+- `workspace_only = true` 時路徑必須留在允許根目錄內；未設定根目錄時使用目前工作目錄
+- `workspace_only = false` 時不限制根目錄
 - 新增 `..` 路徑成分檢查
 - 新增檔案大小檢查
 
@@ -64,8 +65,8 @@
 **修復方向**:
 - [x] 添加 API Key 認證 (X-API-Key header)
 - [x] 實作 CORS 設定
-- [ ] 實作速率限制 (tower-http rate limit)
-- [ ] 添加 IP 白名單功能
+- [x] 實作速率限制（行程內依 IP 計數，不是 tower-http）
+- [x] 添加 IP 白名單功能
 
 **變更**:
 - 新增 `GatewaySecurityConfig` 配置結構
@@ -86,7 +87,7 @@
 
 **修復方向**:
 - [x] 優先從環境變數讀取 API Key
-- [ ] 支援加密的 config 檔案
+- [x] 支援欄位加密（`ENC:` 前綴與 `MINIBOT_CONFIG_KEY`，不是整檔加密）
 - [x] 添加 API Key 存在性檢查
 
 **變更**:
@@ -105,7 +106,7 @@
 
 **修復方向**:
 - [x] 在 `execute_tool` 前檢查迭代次數
-- [ ] 添加最大執行時間限制
+- [x] 添加最大執行時間限制（`max_execution_time_secs`，預設 300 秒）
 
 **變更**:
 - 新增 `tool_iterations` 計數器欄位
@@ -123,7 +124,7 @@
 
 **修復方向**:
 - [x] 添加 SQL injection 防護 (使用參數化查詢 + 輸入驗證)
-- [ ] 考慮添加 SQLite 加密 (sqlcipher) 或記錄加密
+- [x] 記錄內容可加密（應用層 `ENC:`，不是 SQLCipher 整庫加密）
 
 **變更**:
 - 使用參數化查詢 (已實現)
@@ -165,7 +166,7 @@
 
 ## 剩餘待辦事項
 
-所有安全修復已完成！
+本文件列出的修復都已完成。還沒做的是 SQLCipher 整庫加密，以及敏感操作的人工確認。這兩項不在上面的修復清單裡。
 
 ---
 
@@ -225,4 +226,4 @@ cargo test --test integration
 
 ---
 
-*本文件最後更新於 2026-03-04*
+*本文件最後更新於 2026-10-14*

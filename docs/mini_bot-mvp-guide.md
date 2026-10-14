@@ -6,8 +6,7 @@
 
 MiniBot 是一個用 **100% Rust** 實作的高效能 AI Agent 執行框架。其設計目標是：
 
-- **極低資源消耗**：< 5MB RAM 執行時期記憶體
-- **快速啟動**：< 10ms 冷啟動時間
+- **小執行環境**：目標是執行時期記憶體小於 5MB、冷啟動小於 10ms。2026-10-14 以 release 的 `version` 量測，常駐記憶體約 7.5MB，未達到 5MB；暖機後啟動中位數約 3.9ms。詳見 README。
 - **高度模組化**：透過 Trait 驅動的架構，所有元件皆可替換
 - **跨平台**：支援 ARM、x86、RISC-V 架構
 - **安全預設**：嚴格的沙箱隔離、明確的白名單
@@ -21,8 +20,7 @@ MiniBot 是一個用 **100% Rust** 實作的高效能 AI Agent 執行框架。�
 ### 1. 基礎 CLI 命令列介面
 - `mini_bot.rs agent` - 啟動互動式對話
 - `mini_bot.rs gateway` - 啟動 Webhook 閘道伺服器
-- `mini_bot.rs daemon` - 啟動長期執行守護程序
-- `mini_bot.rs config` - 配置管理
+- `mini_bot.rs config` - 查看有效設定，或寫出不含金鑰的範例
 
 ### 2. 單一 AI 模型供應商支援
 - **MiniMax** 作為預設供應商（MiniMax M2.5 國際板）
@@ -32,7 +30,7 @@ MiniBot 是一個用 **100% Rust** 實作的高效能 AI Agent 執行框架。�
 ### 3. 核心工具集
 - **Shell Tool** - 執行系統命令
 - **File Tool** - 檔案讀寫操作
-- **Web Fetch Tool** - 擷取網頁內容
+- **Web Fetch Tool** - 只抓取 http 與 https，並阻擋私有網段
 
 ### 4. 基本記憶體系統
 - SQLite 後端儲存對話歷史
@@ -1487,7 +1485,7 @@ fn load_config() -> Result<Config> {
    - [ ] Ollama (本地模型)
 
 2. **更多的 Tools**
-   - [x] Web Fetch Tool (待實現)
+   - [x] Web Fetch Tool
    - [ ] Web Search Tool
    - [x] File Read/Write Tool
    - [ ] HTTP Request Tool
@@ -1500,8 +1498,8 @@ fn load_config() -> Result<Config> {
 ### 中優先順序
 
 4. **安全性增強**
-   - [ ] 工作區域隔離
-   - [ ] 命令白名單
+   - [x] 工作區域隔離
+   - [x] 命令白名單
    - [ ] 敏感操作確認
 
 5. **記憶體增強**
