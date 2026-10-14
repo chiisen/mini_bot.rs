@@ -27,7 +27,7 @@ mini_bot.rs config    # 查看合併後的有效設定，或寫出範例
 
 - **Shell Tool** - 只執行白名單中的程式名稱與參數，不透過 `sh -c`。單引號與雙引號內的空白會保留。含有分號、管線、重新導向、命令替換或換行的命令會拒絕。`allowed_commands` 為空時拒絕所有命令。
 - **File Tool** - 檔案讀寫。`workspace_only = true` 時路徑必須在允許根目錄內；未設定 `allowed_roots` 時使用目前工作目錄。`workspace_only = false` 時不限制根目錄。
-- ~~Web Fetch Tool~~ - 擷取網頁內容（籌備中）
+- **Web Fetch Tool** - 只抓取 `http` 與 `https` 的文字內容。不允許網址內的帳密，也不允許 localhost、私有網段、link-local 與 loopback。轉址會逐一檢查，不會跟著進到這些位址。預設逾時 10 秒、回應上限 1MB、最多 3 次轉址。
 
 ### Gateway 與對話歷史
 
@@ -140,9 +140,12 @@ max_execution_time_secs = 300
 workspace_only = true
 allowed_roots = []
 allowed_commands = []
+web_fetch_timeout_secs = 10
+web_fetch_max_bytes = 1048576
+web_fetch_max_redirects = 3
 ```
 
-`max_history_chars` 是送往模型前的歷史字元上限。`max_execution_time_secs` 同時是 Agent 單次執行上限與 Gateway HTTP 逾時。`allowed_origins` 為 `["*"]` 或空清單時允許任意來源。`workspace_only = false` 時檔案工具不檢查根目錄。`allowed_commands` 只比對程式名稱，不接受路徑。
+`max_history_chars` 是送往模型前的歷史字元上限。`max_execution_time_secs` 同時是 Agent 單次執行上限與 Gateway HTTP 逾時。`allowed_origins` 為 `["*"]` 或空清單時允許任意來源。`workspace_only = false` 時檔案工具不檢查根目錄。`allowed_commands` 只比對程式名稱，不接受路徑。`web_fetch_timeout_secs`、`web_fetch_max_bytes` 與 `web_fetch_max_redirects` 限制 Web Fetch 的時間、回應大小與轉址次數。
 
 ## 測試
 
@@ -166,7 +169,7 @@ cargo llvm-cov --text
 - `src/config/` - 配置管理
 - `src/agent/` - Agent 核心（含歷史管理）
 - `src/providers/` - AI 供應商
-- `src/tools/` - 工具集合（Shell、File）
+- `src/tools/` - 工具集合（Shell、File、Web Fetch）
 
 ## 授權
 

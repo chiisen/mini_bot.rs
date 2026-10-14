@@ -50,6 +50,24 @@ pub struct SecurityConfig {
     pub workspace_only: bool,
     pub allowed_roots: Vec<String>,
     pub allowed_commands: Vec<String>,
+    #[serde(default = "default_web_fetch_timeout_secs")]
+    pub web_fetch_timeout_secs: u64,
+    #[serde(default = "default_web_fetch_max_bytes")]
+    pub web_fetch_max_bytes: u64,
+    #[serde(default = "default_web_fetch_max_redirects")]
+    pub web_fetch_max_redirects: usize,
+}
+
+fn default_web_fetch_timeout_secs() -> u64 {
+    10
+}
+
+fn default_web_fetch_max_bytes() -> u64 {
+    1024 * 1024
+}
+
+fn default_web_fetch_max_redirects() -> usize {
+    3
 }
 
 impl Default for Config {
@@ -81,6 +99,9 @@ impl Default for Config {
                 workspace_only: true,
                 allowed_roots: vec![],
                 allowed_commands: vec![],
+                web_fetch_timeout_secs: default_web_fetch_timeout_secs(),
+                web_fetch_max_bytes: default_web_fetch_max_bytes(),
+                web_fetch_max_redirects: default_web_fetch_max_redirects(),
             },
         }
     }
@@ -355,6 +376,9 @@ max_execution_time_secs：{execution_secs}
 workspace_only：{workspace_only}
 allowed_roots：{roots}
 allowed_commands：{commands}
+web_fetch_timeout_secs：{web_timeout}
+web_fetch_max_bytes：{web_bytes}
+web_fetch_max_redirects：{web_redirects}
 ",
         path = path.display(),
         provider = config.default_provider,
@@ -373,6 +397,9 @@ allowed_commands：{commands}
         workspace_only = config.security.workspace_only,
         roots = list_label(&config.security.allowed_roots),
         commands = list_label(&config.security.allowed_commands),
+        web_timeout = config.security.web_fetch_timeout_secs,
+        web_bytes = config.security.web_fetch_max_bytes,
+        web_redirects = config.security.web_fetch_max_redirects,
     )
 }
 

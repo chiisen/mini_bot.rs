@@ -5,7 +5,7 @@ use crate::i18n::{tr, tr_with_args};
 use crate::memory::{Memory, MemoryEntry, SqliteMemory};
 use crate::providers::create_provider;
 use crate::providers::{Message, Provider, ToolCall};
-use crate::tools::{FileTool, ShellTool, Tool, ToolResult};
+use crate::tools::{FileTool, ShellTool, Tool, ToolResult, WebFetchTool};
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -50,6 +50,11 @@ impl Agent {
                 30,
             )),
             Arc::new(FileTool::with_config(file_root, 10 * 1024 * 1024)),
+            Arc::new(WebFetchTool::with_limits(
+                config.security.web_fetch_timeout_secs,
+                config.security.web_fetch_max_bytes,
+                config.security.web_fetch_max_redirects,
+            )),
         ];
 
         let tool_definitions = tools

@@ -27,3 +27,6 @@ max_execution_time_secs = 300
 workspace_only = true
 allowed_roots = []
 allowed_commands = []
+web_fetch_timeout_secs = 10
+web_fetch_max_bytes = 1048576
+web_fetch_max_redirects = 3

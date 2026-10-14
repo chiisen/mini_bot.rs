@@ -29,6 +29,9 @@ fn test_config_security_default() {
     let config = Config::default();
     assert!(config.security.workspace_only);
     assert!(config.security.allowed_roots.is_empty());
+    assert_eq!(config.security.web_fetch_timeout_secs, 10);
+    assert_eq!(config.security.web_fetch_max_bytes, 1024 * 1024);
+    assert_eq!(config.security.web_fetch_max_redirects, 3);
 }
 
 #[tokio::test]
@@ -42,11 +45,14 @@ async fn test_shell_tool_available() {
 
 #[test]
 fn test_tools_module_exports() {
-    use mini_bot_rs::tools::{FileTool, ShellTool, Tool};
+    use mini_bot_rs::tools::{FileTool, ShellTool, Tool, WebFetchTool};
 
     let shell = ShellTool::new();
     assert_eq!(shell.name(), "shell");
 
     let file = FileTool::new();
     assert_eq!(file.name(), "file");
+
+    let web = WebFetchTool::new();
+    assert_eq!(web.name(), "web_fetch");
 }
