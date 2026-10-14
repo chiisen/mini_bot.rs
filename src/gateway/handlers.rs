@@ -158,3 +158,100 @@ async fn session_agent(
     );
     Ok(agent)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::gateway::GatewayState;
+    use crate::memory::SqliteMemory;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    fn state_with_memory(memory: Arc<SqliteMemory>) -> GatewayState {
+        GatewayState {
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            config: Config::default(),
+            memory: Some(memory),
+        }
+    }
+
+    #[tokio::test]
+    async fn two_sessions_keep_their_own_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let memory = Arc::new(SqliteMemory::new(dir.path().join("memory.db")).unwrap());
+        let state = state_with_memory(Arc::clone(&memory));
+
+        let alpha = session_agent(&state, "alpha").await.unwrap();
+        {
+            let mut agent = alpha.lock().await;
+            agent.push_history("user", "from-alpha");
+            agent.save_history().await.unwrap();
+        }
+        let beta = session_agent(&state, "beta").await.unwrap();
+        {
+            let mut agent = beta.lock().await;
+            agent.push_history("user", "from-beta");
+            agent.save_history().await.unwrap();
+        }
+
+        let alpha_now = alpha.lock().await.history_snapshot();
+        let beta_now = beta.lock().await.history_snapshot();
+        assert!(alpha_now.iter().any(|message| message.content == "from-alpha"));
+        assert!(alpha_now.iter().all(|message| message.content != "from-beta"));
+        assert!(beta_now.iter().any(|message| message.content == "from-beta"));
+        assert!(beta_now.iter().all(|message| message.content != "from-alpha"));
+
+        let reloaded = state_with_memory(memory);
+        let alpha_again = session_agent(&reloaded, "alpha").await.unwrap();
+        let beta_again = session_agent(&reloaded, "beta").await.unwrap();
+        let alpha_loaded = alpha_again.lock().await.history_snapshot();
+        let beta_loaded = beta_again.lock().await.history_snapshot();
+        assert!(alpha_loaded.iter().any(|message| message.content == "from-alpha"));
+        assert!(alpha_loaded.iter().all(|message| message.content != "from-beta"));
+        assert!(beta_loaded.iter().any(|message| message.content == "from-beta"));
+        assert!(beta_loaded.iter().all(|message| message.content != "from-alpha"));
+    }
+
+    #[tokio::test]
+    async fn new_agent_loads_the_same_session_from_sqlite() {
+        let dir = tempfile::tempdir().unwrap();
+        let memory = Arc::new(SqliteMemory::new(dir.path().join("memory.db")).unwrap());
+        let mut first = Agent::new(Config::default()).unwrap();
+        first.bind_session(Arc::clone(&memory), "kept".to_string());
+        first.push_history("user", "remember-me");
+        first.push_history("assistant", "stored");
+        first.save_history().await.unwrap();
+
+        let mut second = Agent::new(Config::default()).unwrap();
+        second.bind_session(memory, "kept".to_string());
+        second.load_history().await.unwrap();
+        let loaded = second.history_snapshot();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].content, "remember-me");
+        assert_eq!(loaded[1].content, "stored");
+    }
+
+    #[tokio::test]
+    async fn session_limit_drops_the_least_recently_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let memory = Arc::new(SqliteMemory::new(dir.path().join("memory.db")).unwrap());
+        let state = state_with_memory(memory);
+
+        for index in 0..MAX_SESSIONS {
+            session_agent(&state, &format!("s{index}")).await.unwrap();
+        }
+        {
+            let mut sessions = state.sessions.lock().await;
+            sessions.get_mut("s0").unwrap().last_used =
+                Instant::now().checked_sub(Duration::from_secs(3600)).unwrap();
+        }
+
+        session_agent(&state, "newest").await.unwrap();
+        let sessions = state.sessions.lock().await;
+        assert_eq!(sessions.len(), MAX_SESSIONS);
+        assert!(!sessions.contains_key("s0"));
+        assert!(sessions.contains_key("s1"));
+        assert!(sessions.contains_key("newest"));
+    }
+}

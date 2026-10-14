@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Gateway session 隔離、SQLite 歷史還原與超過上限時淘汰最久未使用 session 的測試
 - API Key 環境變數支援 (`MINIBOT_API_KEY`)
 - File Tool 檔案大小限制 (預設 10MB)
 - Shell Tool 命令執行超時 (預設 30 秒)

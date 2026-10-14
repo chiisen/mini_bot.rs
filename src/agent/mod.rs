@@ -86,6 +86,19 @@ impl Agent {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub fn push_history(&mut self, role: &str, content: &str) {
+        self.history.add_message(Message {
+            role: role.to_string(),
+            content: content.to_string(),
+        });
+    }
+
+    #[cfg(test)]
+    pub fn history_snapshot(&self) -> Vec<Message> {
+        self.history.messages().to_vec()
+    }
+
     pub async fn save_history(&self) -> Result<()> {
         let (Some(memory), Some(session_id)) = (&self.memory, &self.session_id) else {
             return Ok(());
