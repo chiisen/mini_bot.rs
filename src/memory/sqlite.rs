@@ -75,12 +75,6 @@ impl SqliteMemory {
         content.to_string()
     }
 
-    fn sanitize_string(s: &str) -> String {
-        s.chars()
-            .filter(|c| c.is_alphanumeric() || c.is_whitespace() || *c == '-' || *c == '_')
-            .collect()
-    }
-
     fn validate_id(id: &str) -> Result<(), String> {
         if id.is_empty() || id.len() > 255 {
             return Err("Invalid ID length".to_string());

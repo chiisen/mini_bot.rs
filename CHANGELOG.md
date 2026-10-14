@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent 整合 Config 中的 security.allowed_commands
 
 ### Changed
+- 刪除未使用的 `SqliteMemory::sanitize_string`。ID 仍由 `validate_id` 拒絕不合法字元，不改寫內容
 - README 補上 Gateway、歷史裁切、逾時、CORS、檔案根目錄與 Shell 白名單的說明，範例設定與 `config.example.toml` 對齊
 - README 說明小於 5MB、冷啟動小於 10ms 是尚未量測的目標，Release 設定是為了縮小執行檔
 - README 記錄 release `version` 的啟動時間與記憶體量測。常駐記憶體約 7.5MB，未達到 5MB 目標

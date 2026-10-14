@@ -141,7 +141,7 @@ MVP 檢查清單都已完成。下面這些不是待辦，是對舊清單的取�
 ### 已開 issue、尚未做
 
 - [Gateway 常駐記憶體](https://github.com/chiisen/mini_bot.rs/issues/14)已量過，RSS 約 6.1MB 至 7.2MB，高於 5MB。數字見 README。
-- [`SqliteMemory::sanitize_string` 沒有人呼叫](https://github.com/chiisen/mini_bot.rs/issues/15)。`validate_id` 已檢查 id。
+- `SqliteMemory::sanitize_string` 已刪除。ID 仍由 `validate_id` 檢查，不改寫記憶體內容。見 [issue 15](https://github.com/chiisen/mini_bot.rs/issues/15)。
 
 ---
 
