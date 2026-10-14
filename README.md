@@ -22,9 +22,16 @@ mini_bot.rs config    # 配置管理
 
 ### 核心工具集
 
-- **Shell Tool** - 執行系統命令
-- **File Tool** - 檔案讀寫操作
+- **Shell Tool** - 只執行白名單中的程式名稱與參數，不透過 `sh -c`。單引號與雙引號內的空白會保留。含有分號、管線、重新導向、命令替換或換行的命令會拒絕。`allowed_commands` 為空時拒絕所有命令。
+- **File Tool** - 檔案讀寫。`workspace_only = true` 時路徑必須在允許根目錄內；未設定 `allowed_roots` 時使用目前工作目錄。`workspace_only = false` 時不限制根目錄。
 - ~~Web Fetch Tool~~ - 擷取網頁內容（籌備中）
+
+### Gateway 與對話歷史
+
+- 每個 `session_id` 使用各自的 Agent。對話寫入該設定目錄的 `memory.db`，同一個 session 重啟後可載回，並受歷史筆數上限限制。記憶體中的 session 超過 128 個時，清掉最久未使用的項目。
+- 送往模型的歷史超過 `agent.max_history_chars`（預設 32000）時，從最舊的非 system 訊息開始移除，並保留最新的使用者訊息與其後尚未完成的工具結果。
+- HTTP 逾時跟隨 `agent.max_execution_time_secs`（預設 300 秒）。逾時時取消該次 `chat`，同一個 session 不會留下仍在執行的請求。
+- CORS 讀取 `gateway_security.allowed_origins`。清單含 `*` 或為空時允許任意來源，否則只允許清單中的來源。
 
 ### 支援的 AI 模型供應商
 
@@ -43,6 +50,7 @@ mini_bot.rs/
 │   ├── agent/              # Agent 核心
 │   ├── providers/          # AI 模型供應商
 │   ├── tools/              # 工具集合
+│   ├── gateway/            # Webhook 閘道
 │   └── memory/             # 記憶體系統
 └── README.md
 ```
@@ -99,17 +107,27 @@ api_key = "YOUR_MINIMAX_API_KEY"
 host = "127.0.0.1"
 port = 3000
 
+[gateway.security]
+api_key = ""
+rate_limit_requests = 10
+rate_limit_window_secs = 60
+allowed_origins = ["*"]
+allowed_ips = []
+
 [agent]
 max_tool_iterations = 100
 max_history_messages = 50
 max_history_chars = 32000
 temperature = 0.7
+max_execution_time_secs = 300
 
 [security]
 workspace_only = true
 allowed_roots = []
 allowed_commands = []
 ```
+
+`max_history_chars` 是送往模型前的歷史字元上限。`max_execution_time_secs` 同時是 Agent 單次執行上限與 Gateway HTTP 逾時。`allowed_origins` 為 `["*"]` 或空清單時允許任意來源。`workspace_only = false` 時檔案工具不檢查根目錄。`allowed_commands` 只比對程式名稱，不接受路徑。
 
 ## 測試
 
