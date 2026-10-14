@@ -36,7 +36,9 @@ impl FileTool {
     }
 
     fn resolved_path(&self, path: &str) -> Option<PathBuf> {
-        let allowed = self.allowed_directory.as_ref()?;
+        let Some(allowed) = self.allowed_directory.as_ref() else {
+            return resolve_unrestricted(path);
+        };
         let root = Path::new(allowed).canonicalize().ok()?;
         let requested = Path::new(path);
         let absolute = if requested.is_absolute() {
@@ -94,6 +96,35 @@ impl FileTool {
 
         Ok(size)
     }
+}
+
+fn resolve_unrestricted(path: &str) -> Option<PathBuf> {
+    if path.is_empty() {
+        return None;
+    }
+    let requested = Path::new(path);
+    let absolute = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(requested)
+    };
+
+    let mut current = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+            Component::RootDir => current.push("/"),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !current.pop() {
+                    return None;
+                }
+            }
+            Component::Normal(part) => current.push(part),
+        }
+    }
+
+    (!current.as_os_str().is_empty()).then_some(current)
 }
 
 impl Default for FileTool {
@@ -312,13 +343,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_file_no_directory_allowed() {
+    async fn test_file_without_root_can_write_outside_workspace() {
+        let outside = TempDir::new().unwrap();
+        let target = outside.path().join("new.txt");
         let tool = FileTool::new();
+
         let result = tool
-            .execute(r#"{"operation": "read", "path": "test.txt"}"#)
+            .execute(
+                &serde_json::json!({
+                    "operation": "write",
+                    "path": target,
+                    "content": "outside"
+                })
+                .to_string(),
+            )
             .await
             .unwrap();
-        assert!(!result.success);
+
+        assert!(result.success);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "outside");
     }
 
     #[tokio::test]
