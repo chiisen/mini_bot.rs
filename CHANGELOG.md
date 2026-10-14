@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `config` 子命令：查看有效設定與寫出範例。API key 只顯示來源（環境變數、設定檔、已加密或未設定），不印出內容
+- 範例設定的 Gateway 安全區段改為 `[gateway_security]`。先前的 `[gateway.security]` 不會被載入
 - Gateway session 隔離、SQLite 歷史還原與超過上限時淘汰最久未使用 session 的測試
 - API Key 環境變數支援 (`MINIBOT_API_KEY`)
 - File Tool 檔案大小限制 (預設 10MB)

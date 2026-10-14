@@ -32,6 +32,22 @@ enum Commands {
         host: Option<String>,
     },
     Version,
+    /// 查看有效設定，或寫出範例設定檔
+    Config {
+        #[command(subcommand)]
+        action: Option<ConfigAction>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ConfigAction {
+    /// 查看有效設定。不顯示 API key 內容，只顯示來源。
+    Show,
+    /// 寫出不含金鑰的範例設定。省略 --output 時印到標準輸出。
+    Example {
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -69,6 +85,18 @@ async fn main() -> Result<()> {
             let version = env!("CARGO_PKG_VERSION");
             println!("{}", tr_with_args("app.version", &[&version]));
         }
+        Commands::Config { action } => match action {
+            None | Some(ConfigAction::Show) => {
+                println!("{}", Config::show(&config_path)?);
+            }
+            Some(ConfigAction::Example { output }) => match output {
+                Some(path) => {
+                    Config::write_example(&path)?;
+                    println!("已寫入 {}", path.display());
+                }
+                None => print!("{}", Config::example_toml()?),
+            },
+        },
     }
 
     Ok(())

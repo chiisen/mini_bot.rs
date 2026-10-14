@@ -8,7 +8,7 @@ api_key = ""
 host = "127.0.0.1"
 port = 3000
 
-[gateway.security]
+[gateway_security]
 # API Key: 優先從環境變數 MINIBOT_GATEWAY_API_KEY 讀取
 api_key = ""
 rate_limit_requests = 10

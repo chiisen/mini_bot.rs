@@ -87,6 +87,12 @@ cargo run -- gateway --port 3000
 
 # 顯示版本
 cargo run -- version
+
+# 查看有效設定（不印出 API key，只顯示來源）
+cargo run -- config
+
+# 把不含金鑰的範例寫到指定路徑
+cargo run -- config example --output ./config.toml
 ```
 
 ## 設定檔
@@ -110,7 +116,7 @@ api_key = "YOUR_MINIMAX_API_KEY"
 host = "127.0.0.1"
 port = 3000
 
-[gateway.security]
+[gateway_security]
 api_key = ""
 rate_limit_requests = 10
 rate_limit_window_secs = 60
