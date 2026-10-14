@@ -60,7 +60,10 @@ impl Agent {
         Ok(Self {
             provider,
             tools,
-            history: history::History::new(config.agent.max_history_messages),
+            history: history::History::new(
+                config.agent.max_history_messages,
+                config.agent.max_history_chars,
+            ),
             memory: None,
             session_id: None,
             config,
@@ -159,7 +162,7 @@ impl Agent {
             let response = self
                 .provider
                 .chat(
-                    self.history.messages().to_vec(),
+                    self.history.for_provider(),
                     Some(self.tool_definitions.clone()),
                 )
                 .await?;

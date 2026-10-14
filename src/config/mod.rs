@@ -35,8 +35,14 @@ pub struct GatewaySecurityConfig {
 pub struct AgentConfig {
     pub max_tool_iterations: usize,
     pub max_history_messages: usize,
+    #[serde(default = "default_max_history_chars")]
+    pub max_history_chars: usize,
     pub temperature: f64,
     pub max_execution_time_secs: u64,
+}
+
+fn default_max_history_chars() -> usize {
+    32_000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +73,7 @@ impl Default for Config {
             agent: AgentConfig {
                 max_tool_iterations: 100,
                 max_history_messages: 50,
+                max_history_chars: default_max_history_chars(),
                 temperature: 0.7,
                 max_execution_time_secs: 300,
             },

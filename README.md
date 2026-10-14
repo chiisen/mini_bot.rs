@@ -102,6 +102,7 @@ port = 3000
 [agent]
 max_tool_iterations = 100
 max_history_messages = 50
+max_history_chars = 32000
 temperature = 0.7
 
 [security]

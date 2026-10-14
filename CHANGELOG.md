@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent 工具迭代次數限制（使用 `max_tool_iterations` 配置）
 - `--config-dir` 會載入該目錄的 `config.toml`；檔案存在但解析失敗時直接報錯
 - 工具定義在 Agent 建立時組一次；工具輸出寫入歷史前截斷為 8KB
+- 送往模型的歷史超過 `agent.max_history_chars`（預設 32000）時，從最舊的非 system 訊息開始移除
 - Webhook 在 Agent 失敗時回 HTTP 500，回應正文不含內部錯誤細節
 - MiniMax HTTP client 設定連線逾時 10 秒、請求逾時 60 秒
 - 互動模式改為非阻塞讀取標準輸入

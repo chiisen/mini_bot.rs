@@ -20,6 +20,7 @@ fn test_config_agent_default() {
     let config = Config::default();
     assert_eq!(config.agent.max_tool_iterations, 100);
     assert_eq!(config.agent.max_history_messages, 50);
+    assert_eq!(config.agent.max_history_chars, 32_000);
     assert_eq!(config.agent.temperature, 0.7);
 }
 
