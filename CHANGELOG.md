@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README 說明小於 5MB、冷啟動小於 10ms 是尚未量測的目標，Release 設定是為了縮小執行檔
 - README 記錄 release `version` 的啟動時間與記憶體量測。常駐記憶體約 7.5MB，未達到 5MB 目標
 - 更新 `docs/SECURITY_TODO.md` 與 `docs/mini_bot-mvp-guide.md` 裡已完成卻仍標成待辦的項目
+- 停用 Aider 與 grepai 指南並備份到 `docs/archive/`。自我升級評估改寫設定變更需重啟，避免讀成熱重載
 - README 說明 `config` 用來查看合併環境變數後的有效設定，以及寫出不含金鑰的範例
 - Agent 工具迭代次數限制（使用 `max_tool_iterations` 配置）
 - `--config-dir` 會載入該目錄的 `config.toml`；檔案存在但解析失敗時直接報錯
