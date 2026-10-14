@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - FileTool 以允許根目錄正規化路徑，不存在的新檔也不會寫到根目錄外
 - `workspace_only` 且未設定根目錄時，檔案工具使用目前工作目錄
 - Shell 只執行白名單中的程式名稱與參數，不再透過 `sh -c`
+- Shell 參數保留單引號與雙引號內的空白
 - 設定檔省略 `api_key` 時以空字串載入
 
 ---

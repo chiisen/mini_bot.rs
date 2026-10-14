@@ -55,12 +55,52 @@ fn parse_argv(command: &str) -> Result<Vec<String>, String> {
         return Err("Shell metacharacters are not allowed".to_string());
     }
 
-    let parts: Vec<String> = command.split_whitespace().map(str::to_string).collect();
+    let parts = split_argv(command)?;
     if parts.is_empty() {
         return Err("Missing command".to_string());
     }
     if parts[0].contains('/') || parts[0].contains('\\') {
         return Err("Command path is not allowed".to_string());
+    }
+    Ok(parts)
+}
+
+fn split_argv(command: &str) -> Result<Vec<String>, String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut chars = command.chars().peekable();
+    let mut in_token = false;
+    let mut quote: Option<char> = None;
+
+    while let Some(ch) = chars.next() {
+        match quote {
+            Some(q) if ch == q => quote = None,
+            Some(_) => {
+                current.push(ch);
+                in_token = true;
+            }
+            None if ch == '"' || ch == '\'' => {
+                quote = Some(ch);
+                in_token = true;
+            }
+            None if ch.is_whitespace() => {
+                if in_token {
+                    parts.push(std::mem::take(&mut current));
+                    in_token = false;
+                }
+            }
+            None => {
+                current.push(ch);
+                in_token = true;
+            }
+        }
+    }
+
+    if quote.is_some() {
+        return Err("Unclosed quote".to_string());
+    }
+    if in_token {
+        parts.push(current);
     }
     Ok(parts)
 }
@@ -209,6 +249,25 @@ mod tests {
             .await
             .unwrap();
         assert!(!result.success);
+    }
+
+    #[test]
+    fn test_parse_argv_keeps_quoted_spaces() {
+        let argv = parse_argv(r#"echo "a b""#).unwrap();
+        assert_eq!(argv, vec!["echo", "a b"]);
+        let argv = parse_argv("echo 'a b'").unwrap();
+        assert_eq!(argv, vec!["echo", "a b"]);
+    }
+
+    #[tokio::test]
+    async fn test_shell_echo_keeps_quoted_spaces() {
+        let tool = ShellTool::with_allowed(vec!["echo".to_string()]);
+        let result = tool
+            .execute(r#"{"command": "echo \"a b\""}"#)
+            .await
+            .unwrap();
+        assert!(result.success);
+        assert_eq!(result.output, "a b\n");
     }
 
     #[tokio::test]
