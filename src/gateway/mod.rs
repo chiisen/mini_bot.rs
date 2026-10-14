@@ -231,7 +231,11 @@ pub async fn run(host: &str, port: u16, config_path: &PathBuf) -> Result<()> {
     );
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -345,6 +349,40 @@ mod tests {
             .unwrap();
         assert_eq!(first.status(), StatusCode::OK);
         assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn health_over_tcp_receives_client_address() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let probe = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+
+        tokio::spawn(async move {
+            run("127.0.0.1", port, &config_path).await.unwrap();
+        });
+
+        let mut response = String::new();
+        for _ in 0..50 {
+            if let Ok(mut stream) =
+                tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await
+            {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                stream
+                    .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                    .await
+                    .unwrap();
+                let mut buffer = Vec::new();
+                stream.read_to_end(&mut buffer).await.unwrap();
+                response = String::from_utf8_lossy(&buffer).into_owned();
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert!(!response.contains("ConnectInfo"));
     }
 
     #[test]
