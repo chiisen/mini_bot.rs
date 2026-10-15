@@ -46,6 +46,11 @@ static TRANSLATIONS: LazyLock<HashMap<&'static str, HashMap<&'static str, &'stat
             "gateway.agent_error_public",
             "Agent failed to handle the request",
         );
+        en.insert("gateway.invalid_session_id", "Rejected invalid session id");
+        en.insert(
+            "gateway.invalid_session_id_public",
+            "Invalid session id",
+        );
         m.insert("en", en);
 
         let mut zh_tw = HashMap::new();
@@ -74,6 +79,8 @@ static TRANSLATIONS: LazyLock<HashMap<&'static str, HashMap<&'static str, &'stat
         zh_tw.insert("gateway.request_timeout", "請求逾時");
         zh_tw.insert("gateway.request_timeout_public", "請求逾時");
         zh_tw.insert("gateway.agent_error_public", "Agent 無法處理此請求");
+        zh_tw.insert("gateway.invalid_session_id", "拒絕不合法的 session id");
+        zh_tw.insert("gateway.invalid_session_id_public", "session id 不合法");
         m.insert("zh-tw", zh_tw);
 
         let mut zh_cn = HashMap::new();
@@ -102,6 +109,8 @@ static TRANSLATIONS: LazyLock<HashMap<&'static str, HashMap<&'static str, &'stat
         zh_cn.insert("gateway.request_timeout", "请求超时");
         zh_cn.insert("gateway.request_timeout_public", "请求超时");
         zh_cn.insert("gateway.agent_error_public", "Agent 无法处理此请求");
+        zh_cn.insert("gateway.invalid_session_id", "拒绝不合法的 session id");
+        zh_cn.insert("gateway.invalid_session_id_public", "session id 不合法");
         m.insert("zh-cn", zh_cn);
 
         m

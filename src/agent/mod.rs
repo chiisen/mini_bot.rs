@@ -18,7 +18,7 @@ pub struct Agent {
     tools: Vec<Arc<dyn Tool>>,
     history: history::History,
     memory: Option<Arc<SqliteMemory>>,
-    session_id: Option<String>,
+    session: Option<BoundSession>,
     config: Config,
     tool_definitions: Vec<serde_json::Value>,
     start_time: Option<Instant>,
@@ -70,7 +70,7 @@ impl Agent {
                 config.agent.max_history_chars,
             ),
             memory: None,
-            session_id: None,
+            session: None,
             config,
             tool_definitions,
             start_time: None,
@@ -82,17 +82,29 @@ impl Agent {
         self.provider = provider;
     }
 
-    pub fn bind_session(&mut self, memory: Arc<SqliteMemory>, session_id: String) {
+    pub fn bind_session(
+        &mut self,
+        memory: Arc<SqliteMemory>,
+        kind: SessionKind,
+        session_id: String,
+    ) {
         self.memory = Some(memory);
-        self.session_id = Some(session_id);
+        self.session = Some(BoundSession { kind, id: session_id });
     }
 
     pub async fn load_history(&mut self) -> Result<()> {
-        let (Some(memory), Some(session_id)) = (&self.memory, &self.session_id) else {
+        let (Some(memory), Some(session)) = (&self.memory, &self.session) else {
             return Ok(());
         };
-        let id = session_memory_id(session_id);
-        if let Some(entry) = memory.get(&id).await.map_err(anyhow::Error::msg)? {
+        let id = session_memory_id(session.kind, &session.id).map_err(anyhow::Error::msg)?;
+        let entry = if let Some(entry) = memory.get(&id).await.map_err(anyhow::Error::msg)? {
+            Some(entry)
+        } else if let Some(legacy) = legacy_session_memory_id(session.kind, &session.id) {
+            memory.get(&legacy).await.map_err(anyhow::Error::msg)?
+        } else {
+            None
+        };
+        if let Some(entry) = entry {
             let messages: Vec<Message> = serde_json::from_str(&entry.content).unwrap_or_default();
             self.history.replace(messages);
         }
@@ -113,22 +125,29 @@ impl Agent {
     }
 
     pub async fn save_history(&self) -> Result<()> {
-        let (Some(memory), Some(session_id)) = (&self.memory, &self.session_id) else {
+        let (Some(memory), Some(session)) = (&self.memory, &self.session) else {
             return Ok(());
         };
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_secs() as i64)
             .unwrap_or(0);
+        let id = session_memory_id(session.kind, &session.id).map_err(anyhow::Error::msg)?;
         let entry = MemoryEntry {
-            id: session_memory_id(session_id),
+            id: id.clone(),
             category: "session".to_string(),
-            key: session_id.clone(),
+            key: session.id.clone(),
             content: serde_json::to_string(self.history.messages())?,
             created_at: now,
             updated_at: now,
         };
-        memory.store(&entry).await.map_err(anyhow::Error::msg)
+        memory.store(&entry).await.map_err(anyhow::Error::msg)?;
+        if let Some(legacy) = legacy_session_memory_id(session.kind, &session.id) {
+            if legacy != id {
+                memory.delete(&legacy).await.map_err(anyhow::Error::msg)?;
+            }
+        }
+        Ok(())
     }
 
     pub async fn chat(&mut self, user_input: &str) -> Result<String> {
@@ -220,19 +239,54 @@ impl Agent {
     }
 }
 
-fn session_memory_id(session_id: &str) -> String {
-    let safe: String = session_id
+const MAX_SESSION_ID_LEN: usize = 240;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionKind {
+    Cli,
+    Gateway,
+}
+
+struct BoundSession {
+    kind: SessionKind,
+    id: String,
+}
+
+pub fn validate_session_id(session_id: &str) -> Result<(), String> {
+    if session_id.is_empty() || session_id.len() > MAX_SESSION_ID_LEN {
+        return Err("invalid session id".to_string());
+    }
+    if !session_id
         .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-        .take(240)
-        .collect();
-    format!("sess_{safe}")
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("invalid session id".to_string());
+    }
+    Ok(())
+}
+
+pub fn session_memory_id(kind: SessionKind, session_id: &str) -> Result<String, String> {
+    validate_session_id(session_id)?;
+    let prefix = match kind {
+        SessionKind::Cli => "cli",
+        SessionKind::Gateway => "gw",
+    };
+    Ok(format!("{prefix}_{session_id}"))
+}
+
+/// 舊版把合法 ID 存成 `sess_{id}`。`cli` 只屬於 CLI，Gateway 不讀那筆。
+fn legacy_session_memory_id(kind: SessionKind, session_id: &str) -> Option<String> {
+    match kind {
+        SessionKind::Cli if session_id == "cli" => Some("sess_cli".to_string()),
+        SessionKind::Gateway if session_id != "cli" => Some(format!("sess_{session_id}")),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::memory::SqliteMemory;
+    use crate::memory::{Memory, MemoryEntry, SqliteMemory};
     use crate::providers::{ProviderError, Response, ToolCall};
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -290,7 +344,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let memory = Arc::new(SqliteMemory::new(dir.path().join("memory.db")).unwrap());
         let mut agent = Agent::new(Config::default()).unwrap();
-        agent.bind_session(Arc::clone(&memory), "chat".to_string());
+        agent.bind_session(Arc::clone(&memory), SessionKind::Gateway, "chat".to_string());
         agent.set_provider(Arc::new(ScriptedProvider {
             step: AtomicUsize::new(0),
             delay: Duration::ZERO,
@@ -303,7 +357,7 @@ mod tests {
         assert!(saved.iter().any(|message| message.content == "done"));
 
         let mut restored = Agent::new(Config::default()).unwrap();
-        restored.bind_session(memory, "chat".to_string());
+        restored.bind_session(memory, SessionKind::Gateway, "chat".to_string());
         restored.load_history().await.unwrap();
         let loaded = restored.history_snapshot();
         assert!(loaded.iter().any(|message| message.content == "done"));
@@ -338,6 +392,121 @@ mod tests {
         let error = agent.chat("slow").await.unwrap_err();
         assert!(error.to_string().contains('1'));
     }
+
+    async fn save_text(memory: &Arc<SqliteMemory>, kind: SessionKind, id: &str, text: &str) {
+        let mut agent = Agent::new(Config::default()).unwrap();
+        agent.bind_session(Arc::clone(memory), kind, id.to_string());
+        agent.push_history("user", text);
+        agent.save_history().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn distinct_ids_do_not_share_storage() {
+        let dir = tempfile::tempdir().unwrap();
+        let memory = Arc::new(SqliteMemory::new(dir.path().join("memory.db")).unwrap());
+        let shared = "a".repeat(239);
+        let left = format!("{shared}X");
+        let right = format!("{shared}Y");
+        save_text(&memory, SessionKind::Gateway, &left, "left").await;
+        save_text(&memory, SessionKind::Gateway, &right, "right").await;
+
+        let mut reloaded = Agent::new(Config::default()).unwrap();
+        reloaded.bind_session(Arc::clone(&memory), SessionKind::Gateway, left);
+        reloaded.load_history().await.unwrap();
+        assert!(reloaded
+            .history_snapshot()
+            .iter()
+            .any(|message| message.content == "left"));
+        assert!(reloaded
+            .history_snapshot()
+            .iter()
+            .all(|message| message.content != "right"));
+
+        assert!(validate_session_id("a.b").is_err());
+        assert!(validate_session_id("中文").is_err());
+        assert!(validate_session_id(&"z".repeat(241)).is_err());
+        assert!(memory.get("sess_ab").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn cli_and_gateway_keep_separate_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let memory = Arc::new(SqliteMemory::new(dir.path().join("memory.db")).unwrap());
+        save_text(&memory, SessionKind::Cli, "cli", "from-cli").await;
+        save_text(&memory, SessionKind::Gateway, "cli", "from-gateway").await;
+
+        let mut cli = Agent::new(Config::default()).unwrap();
+        cli.bind_session(Arc::clone(&memory), SessionKind::Cli, "cli".to_string());
+        cli.load_history().await.unwrap();
+        assert!(cli
+            .history_snapshot()
+            .iter()
+            .any(|message| message.content == "from-cli"));
+        assert!(cli
+            .history_snapshot()
+            .iter()
+            .all(|message| message.content != "from-gateway"));
+
+        let mut gateway = Agent::new(Config::default()).unwrap();
+        gateway.bind_session(memory, SessionKind::Gateway, "cli".to_string());
+        gateway.load_history().await.unwrap();
+        assert!(gateway
+            .history_snapshot()
+            .iter()
+            .any(|message| message.content == "from-gateway"));
+        assert!(gateway
+            .history_snapshot()
+            .iter()
+            .all(|message| message.content != "from-cli"));
+    }
+
+    #[tokio::test]
+    async fn legacy_session_keys_load_into_the_matching_namespace() {
+        let dir = tempfile::tempdir().unwrap();
+        let memory = Arc::new(SqliteMemory::new(dir.path().join("memory.db")).unwrap());
+        let now = 1_i64;
+        for (id, content) in [("sess_alpha", "old-alpha"), ("sess_cli", "old-cli")] {
+            memory
+                .store(&MemoryEntry {
+                    id: id.to_string(),
+                    category: "session".to_string(),
+                    key: id.to_string(),
+                    content: serde_json::to_string(&vec![Message {
+                        role: "user".to_string(),
+                        content: content.to_string(),
+                    }])
+                    .unwrap(),
+                    created_at: now,
+                    updated_at: now,
+                })
+                .await
+                .unwrap();
+        }
+
+        let mut gateway = Agent::new(Config::default()).unwrap();
+        gateway.bind_session(Arc::clone(&memory), SessionKind::Gateway, "alpha".to_string());
+        gateway.load_history().await.unwrap();
+        assert!(gateway
+            .history_snapshot()
+            .iter()
+            .any(|message| message.content == "old-alpha"));
+        gateway.save_history().await.unwrap();
+        assert!(memory.get("gw_alpha").await.unwrap().is_some());
+        assert!(memory.get("sess_alpha").await.unwrap().is_none());
+
+        let mut gateway_cli = Agent::new(Config::default()).unwrap();
+        gateway_cli.bind_session(Arc::clone(&memory), SessionKind::Gateway, "cli".to_string());
+        gateway_cli.load_history().await.unwrap();
+        assert!(gateway_cli.history_snapshot().is_empty());
+
+        let mut cli = Agent::new(Config::default()).unwrap();
+        cli.bind_session(memory, SessionKind::Cli, "cli".to_string());
+        cli.load_history().await.unwrap();
+        assert!(cli
+            .history_snapshot()
+            .iter()
+            .any(|message| message.content == "old-cli"));
+    }
 }
 
 fn truncate_chars(input: &str, max_chars: usize) -> String {
@@ -360,7 +529,7 @@ pub async fn run(message: Option<String>, config_path: &PathBuf) -> Result<()> {
         let _ = std::fs::create_dir_all(parent);
     }
     if let Ok(memory) = SqliteMemory::new(memory_path) {
-        agent.bind_session(Arc::new(memory), "cli".to_string());
+        agent.bind_session(Arc::new(memory), SessionKind::Cli, "cli".to_string());
         agent.load_history().await?;
     }
 

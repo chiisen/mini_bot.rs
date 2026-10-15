@@ -141,7 +141,8 @@ MVP 檢查清單都已完成。下面這些不是待辦，是對舊清單的取�
 ### 已開 issue、尚未做
 
 - [Gateway 常駐記憶體](https://github.com/chiisen/mini_bot.rs/issues/14)已量過，RSS 約 6.1MB 至 7.2MB，高於 5MB。數字見 README。
-- `SqliteMemory::sanitize_string` 已刪除。ID 仍由 `validate_id` 檢查，不改寫記憶體內容。見 [issue 15](https://github.com/chiisen/mini_bot.rs/issues/15)。
+- `SqliteMemory::sanitize_string` 已刪除。記憶體 ID 仍由 `validate_id` 檢查，不改寫內容。見 [issue 15](https://github.com/chiisen/mini_bot.rs/issues/15)。
+- Session 紀錄鍵是 `cli_` 或 `gw_` 接上完整 session id。標點、非 ASCII 與超過 240 字元的 id 會被拒絕。CLI 與 Gateway 即使都叫 `cli` 也不共用同一筆。
 
 ---
 

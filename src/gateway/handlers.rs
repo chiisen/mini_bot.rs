@@ -1,6 +1,6 @@
 //! Gateway request handlers
 
-use crate::agent::Agent;
+use crate::agent::{validate_session_id, Agent, SessionKind};
 use crate::gateway::{GatewayState, SessionSlot, MAX_SESSIONS};
 use crate::i18n::{tr, tr_with_args};
 use axum::http::StatusCode;
@@ -74,6 +74,17 @@ pub async fn webhook_handler(
     let session_id = payload
         .session_id
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    if validate_session_id(&session_id).is_err() {
+        error!("{}", tr("gateway.invalid_session_id"));
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(WebhookResponse {
+                response: tr("gateway.invalid_session_id_public"),
+                session_id: None,
+            }),
+        )
+            .into_response();
+    }
     let agent = match session_agent(&state, &session_id).await {
         Ok(agent) => agent,
         Err(error) => {
@@ -165,7 +176,11 @@ async fn session_agent(
 
     let mut agent = Agent::new(state.config.clone()).map_err(|e| e.to_string())?;
     if let Some(memory) = &state.memory {
-        agent.bind_session(Arc::clone(memory), session_id.to_string());
+        agent.bind_session(
+            Arc::clone(memory),
+            SessionKind::Gateway,
+            session_id.to_string(),
+        );
         agent.load_history().await.map_err(|e| e.to_string())?;
     }
     let agent = Arc::new(Mutex::new(agent));
@@ -238,13 +253,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let memory = Arc::new(SqliteMemory::new(dir.path().join("memory.db")).unwrap());
         let mut first = Agent::new(Config::default()).unwrap();
-        first.bind_session(Arc::clone(&memory), "kept".to_string());
+        first.bind_session(Arc::clone(&memory), SessionKind::Gateway, "kept".to_string());
         first.push_history("user", "remember-me");
         first.push_history("assistant", "stored");
         first.save_history().await.unwrap();
 
         let mut second = Agent::new(Config::default()).unwrap();
-        second.bind_session(memory, "kept".to_string());
+        second.bind_session(memory, SessionKind::Gateway, "kept".to_string());
         second.load_history().await.unwrap();
         let loaded = second.history_snapshot();
         assert_eq!(loaded.len(), 2);
@@ -323,5 +338,25 @@ mod tests {
         assert!(result.is_err());
         tokio::time::sleep(Duration::from_millis(250)).await;
         assert!(!finished.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn invalid_session_id_is_rejected_before_create() {
+        let dir = tempfile::tempdir().unwrap();
+        let memory = Arc::new(SqliteMemory::new(dir.path().join("memory.db")).unwrap());
+        let state = state_with_memory(memory);
+        for session_id in ["a.b", "中文", &"z".repeat(241)] {
+            let response = webhook_handler(
+                State(state.clone()),
+                Json(WebhookRequest {
+                    message: "hi".to_string(),
+                    session_id: Some(session_id.to_string()),
+                }),
+            )
+            .await
+            .into_response();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+        assert!(state.sessions.lock().await.is_empty());
     }
 }

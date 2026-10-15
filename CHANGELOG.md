@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent 整合 Config 中的 security.allowed_commands
 
 ### Changed
+- Session 持久化鍵改為 `cli_` 或 `gw_` 加上完整 ID，不再刪字或截斷。不合法 ID 的 webhook 回 HTTP 400。舊的 `sess_cli` 只還原到 CLI，其他合法舊鍵還原到 Gateway 後改存新鍵
 - Gateway 啟動時帶上 `ConnectInfo`，實際連線的 `/health` 不再因讀不到客戶端位址而回 HTTP 500
 - 刪除未使用的 `SqliteMemory::sanitize_string`。ID 仍由 `validate_id` 拒絕不合法字元，不改寫內容
 - README 補上 Gateway、歷史裁切、逾時、CORS、檔案根目錄與 Shell 白名單的說明，範例設定與 `config.example.toml` 對齊
