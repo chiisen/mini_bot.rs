@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent 整合 Config 中的 security.allowed_commands
 
 ### Changed
+- Gateway 只淘汰沒有請求使用的 session。容量滿且都在忙時回 HTTP 503。同一個 session id 只會有一個 Agent
 - Web Fetch 每一跳連到已驗證的位址，停用環境 proxy，DNS、轉址與讀取共用同一個逾時
 - Agent 的同一次 chat 用 `max_execution_time_secs` 限制 Provider、工具與歷史寫入。逾時回錯誤，CLI 與 Gateway 都不會把逾時當成成功
 - Shell 同時讀取 stdout 與 stderr，合計緩衝上限 64KB。超過、逾時或 future 取消時終止並回收直接子行程。衍生行程不在回收範圍

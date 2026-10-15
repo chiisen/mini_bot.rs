@@ -47,6 +47,11 @@ static TRANSLATIONS: LazyLock<HashMap<&'static str, HashMap<&'static str, &'stat
             "Agent failed to handle the request",
         );
         en.insert("gateway.invalid_session_id", "Rejected invalid session id");
+        en.insert("gateway.session_capacity", "Session capacity is full");
+        en.insert(
+            "gateway.session_capacity_public",
+            "Too many active sessions",
+        );
         en.insert(
             "gateway.invalid_session_id_public",
             "Invalid session id",
@@ -80,6 +85,8 @@ static TRANSLATIONS: LazyLock<HashMap<&'static str, HashMap<&'static str, &'stat
         zh_tw.insert("gateway.request_timeout_public", "請求逾時");
         zh_tw.insert("gateway.agent_error_public", "Agent 無法處理此請求");
         zh_tw.insert("gateway.invalid_session_id", "拒絕不合法的 session id");
+        zh_tw.insert("gateway.session_capacity", "Session 容量已滿");
+        zh_tw.insert("gateway.session_capacity_public", "使用中的 session 已達上限");
         zh_tw.insert("gateway.invalid_session_id_public", "session id 不合法");
         m.insert("zh-tw", zh_tw);
 
@@ -110,6 +117,8 @@ static TRANSLATIONS: LazyLock<HashMap<&'static str, HashMap<&'static str, &'stat
         zh_cn.insert("gateway.request_timeout_public", "请求超时");
         zh_cn.insert("gateway.agent_error_public", "Agent 无法处理此请求");
         zh_cn.insert("gateway.invalid_session_id", "拒绝不合法的 session id");
+        zh_cn.insert("gateway.session_capacity", "Session 容量已满");
+        zh_cn.insert("gateway.session_capacity_public", "使用中的 session 已达上限");
         zh_cn.insert("gateway.invalid_session_id_public", "session id 不合法");
         m.insert("zh-cn", zh_cn);
 

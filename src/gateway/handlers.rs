@@ -85,9 +85,20 @@ pub async fn webhook_handler(
         )
             .into_response();
     }
-    let agent = match session_agent(&state, &session_id).await {
-        Ok(agent) => agent,
-        Err(error) => {
+    let permit = match session_agent(&state, &session_id).await {
+        Ok(permit) => permit,
+        Err(SessionError::Capacity) => {
+            error!("{}", tr("gateway.session_capacity"));
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(WebhookResponse {
+                    response: tr("gateway.session_capacity_public"),
+                    session_id: Some(session_id),
+                }),
+            )
+                .into_response();
+        }
+        Err(SessionError::Internal(error)) => {
             error!("{}", tr_with_args("gateway.agent_error", &[&error]));
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -100,10 +111,14 @@ pub async fn webhook_handler(
         }
     };
 
+    let agent = permit.agent();
     let mut agent = agent.lock().await;
     let limit = crate::gateway::request_timeout(&state.config);
 
-    match chat_within_limit(&mut agent, &payload.message, limit).await {
+    let outcome = chat_within_limit(&mut agent, &payload.message, limit).await;
+    drop(agent);
+    permit.release().await;
+    match outcome {
         Ok(Ok(response)) => {
             let sanitized_response = sanitize_for_log(&response);
             info!(
@@ -152,46 +167,156 @@ async fn chat_within_limit(
     tokio::time::timeout(limit, agent.chat(message)).await
 }
 
+#[derive(Debug)]
+enum SessionError {
+    Capacity,
+    Internal(String),
+}
+
+struct SessionPermit {
+    agent: Arc<Mutex<Agent>>,
+    sessions: Arc<Mutex<std::collections::HashMap<String, SessionSlot>>>,
+    id: String,
+    released: bool,
+}
+
+impl SessionPermit {
+    fn agent(&self) -> Arc<Mutex<Agent>> {
+        Arc::clone(&self.agent)
+    }
+
+    async fn release(mut self) {
+        self.release_inner().await;
+    }
+
+    async fn release_inner(&mut self) {
+        if self.released {
+            return;
+        }
+        self.released = true;
+        let mut sessions = self.sessions.lock().await;
+        if let Some(slot) = sessions.get_mut(&self.id) {
+            slot.users = slot.users.saturating_sub(1);
+        }
+    }
+}
+
+impl Drop for SessionPermit {
+    fn drop(&mut self) {
+        if self.released {
+            return;
+        }
+        self.released = true;
+        let sessions = Arc::clone(&self.sessions);
+        let id = self.id.clone();
+        tokio::spawn(async move {
+            let mut sessions = sessions.lock().await;
+            if let Some(slot) = sessions.get_mut(&id) {
+                slot.users = slot.users.saturating_sub(1);
+            }
+        });
+    }
+}
+
 async fn session_agent(
     state: &GatewayState,
     session_id: &str,
-) -> Result<Arc<Mutex<Agent>>, String> {
-    let mut sessions = state.sessions.lock().await;
-    if let Some(slot) = sessions.get_mut(session_id) {
-        slot.last_used = Instant::now();
-        return Ok(Arc::clone(&slot.agent));
-    }
+) -> Result<SessionPermit, SessionError> {
+    let wait = std::time::Duration::from_secs(5);
+    let started = Instant::now();
+    loop {
+        if started.elapsed() > wait {
+            return Err(SessionError::Capacity);
+        }
+        let create = {
+            let mut sessions = state.sessions.lock().await;
+            let mut loading = state.loading.lock().await;
+            if let Some(slot) = sessions.get_mut(session_id) {
+                slot.last_used = Instant::now();
+                slot.users += 1;
+                return Ok(SessionPermit {
+                    agent: Arc::clone(&slot.agent),
+                    sessions: Arc::clone(&state.sessions),
+                    id: session_id.to_string(),
+                    released: false,
+                });
+            }
+            let mut should_create = false;
+            if loading.contains(session_id) {
+            } else if sessions.len() + loading.len() >= MAX_SESSIONS {
+                let oldest = sessions
+                    .iter()
+                    .filter(|(_, slot)| slot.users == 0)
+                    .min_by_key(|(_, slot)| slot.last_used)
+                    .map(|(id, _)| id.clone());
+                if let Some(id) = oldest {
+                    sessions.remove(&id);
+                    loading.insert(session_id.to_string());
+                    should_create = true;
+                } else {
+                    return Err(SessionError::Capacity);
+                }
+            } else {
+                loading.insert(session_id.to_string());
+                should_create = true;
+            }
+            should_create
+        };
+        if !create {
+            tokio::time::timeout(std::time::Duration::from_millis(50), state.session_ready.notified())
+                .await
+                .ok();
+            continue;
+        }
 
-    while sessions.len() >= MAX_SESSIONS {
-        let oldest = sessions
-            .iter()
-            .min_by_key(|(_, slot)| slot.last_used)
-            .map(|(id, _)| id.clone());
-        if let Some(id) = oldest {
-            sessions.remove(&id);
-        } else {
-            break;
+        let built = async {
+            let mut agent = Agent::new(state.config.clone()).map_err(|error| error.to_string())?;
+            if let Some(memory) = &state.memory {
+                agent.bind_session(
+                    Arc::clone(memory),
+                    SessionKind::Gateway,
+                    session_id.to_string(),
+                );
+                agent.load_history().await.map_err(|error| error.to_string())?;
+            }
+            Ok::<_, String>(Arc::new(Mutex::new(agent)))
+        }
+        .await;
+
+        let mut sessions = state.sessions.lock().await;
+        let mut loading = state.loading.lock().await;
+        loading.remove(session_id);
+        state.session_ready.notify_waiters();
+        match built {
+            Ok(agent) => {
+                if let Some(existing) = sessions.get_mut(session_id) {
+                    existing.last_used = Instant::now();
+                    existing.users += 1;
+                    return Ok(SessionPermit {
+                        agent: Arc::clone(&existing.agent),
+                        sessions: Arc::clone(&state.sessions),
+                        id: session_id.to_string(),
+                        released: false,
+                    });
+                }
+                sessions.insert(
+                    session_id.to_string(),
+                    SessionSlot {
+                        agent: Arc::clone(&agent),
+                        last_used: Instant::now(),
+                        users: 1,
+                    },
+                );
+                return Ok(SessionPermit {
+                    agent,
+                    sessions: Arc::clone(&state.sessions),
+                    id: session_id.to_string(),
+                    released: false,
+                });
+            }
+            Err(error) => return Err(SessionError::Internal(error)),
         }
     }
-
-    let mut agent = Agent::new(state.config.clone()).map_err(|e| e.to_string())?;
-    if let Some(memory) = &state.memory {
-        agent.bind_session(
-            Arc::clone(memory),
-            SessionKind::Gateway,
-            session_id.to_string(),
-        );
-        agent.load_history().await.map_err(|e| e.to_string())?;
-    }
-    let agent = Arc::new(Mutex::new(agent));
-    sessions.insert(
-        session_id.to_string(),
-        SessionSlot {
-            agent: Arc::clone(&agent),
-            last_used: Instant::now(),
-        },
-    );
-    Ok(agent)
 }
 
 #[cfg(test)]
@@ -206,6 +331,8 @@ mod tests {
     fn state_with_memory(memory: Arc<SqliteMemory>) -> GatewayState {
         GatewayState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            loading: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            session_ready: Arc::new(tokio::sync::Notify::new()),
             config: Config::default(),
             memory: Some(memory),
         }
@@ -219,19 +346,21 @@ mod tests {
 
         let alpha = session_agent(&state, "alpha").await.unwrap();
         {
-            let mut agent = alpha.lock().await;
+            let agent_ref = alpha.agent();
+            let mut agent = agent_ref.lock().await;
             agent.push_history("user", "from-alpha");
             agent.save_history().await.unwrap();
         }
         let beta = session_agent(&state, "beta").await.unwrap();
         {
-            let mut agent = beta.lock().await;
+            let agent_ref = beta.agent();
+            let mut agent = agent_ref.lock().await;
             agent.push_history("user", "from-beta");
             agent.save_history().await.unwrap();
         }
 
-        let alpha_now = alpha.lock().await.history_snapshot();
-        let beta_now = beta.lock().await.history_snapshot();
+        let alpha_now = alpha.agent().lock().await.history_snapshot();
+        let beta_now = beta.agent().lock().await.history_snapshot();
         assert!(alpha_now.iter().any(|message| message.content == "from-alpha"));
         assert!(alpha_now.iter().all(|message| message.content != "from-beta"));
         assert!(beta_now.iter().any(|message| message.content == "from-beta"));
@@ -240,8 +369,8 @@ mod tests {
         let reloaded = state_with_memory(memory);
         let alpha_again = session_agent(&reloaded, "alpha").await.unwrap();
         let beta_again = session_agent(&reloaded, "beta").await.unwrap();
-        let alpha_loaded = alpha_again.lock().await.history_snapshot();
-        let beta_loaded = beta_again.lock().await.history_snapshot();
+        let alpha_loaded = alpha_again.agent().lock().await.history_snapshot();
+        let beta_loaded = beta_again.agent().lock().await.history_snapshot();
         assert!(alpha_loaded.iter().any(|message| message.content == "from-alpha"));
         assert!(alpha_loaded.iter().all(|message| message.content != "from-beta"));
         assert!(beta_loaded.iter().any(|message| message.content == "from-beta"));
@@ -274,7 +403,11 @@ mod tests {
         let state = state_with_memory(memory);
 
         for index in 0..MAX_SESSIONS {
-            session_agent(&state, &format!("s{index}")).await.unwrap();
+            session_agent(&state, &format!("s{index}"))
+                .await
+                .unwrap()
+                .release()
+                .await;
         }
         {
             let mut sessions = state.sessions.lock().await;
@@ -282,12 +415,77 @@ mod tests {
                 Instant::now().checked_sub(Duration::from_secs(3600)).unwrap();
         }
 
-        session_agent(&state, "newest").await.unwrap();
+        session_agent(&state, "newest").await.unwrap().release().await;
         let sessions = state.sessions.lock().await;
         assert_eq!(sessions.len(), MAX_SESSIONS);
         assert!(!sessions.contains_key("s0"));
         assert!(sessions.contains_key("s1"));
         assert!(sessions.contains_key("newest"));
+    }
+
+    #[tokio::test]
+    async fn in_use_session_is_not_evicted_and_stays_unique() {
+        let dir = tempfile::tempdir().unwrap();
+        let memory = Arc::new(SqliteMemory::new(dir.path().join("memory.db")).unwrap());
+        let state = state_with_memory(memory);
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+        let state_for_busy = state.clone();
+        let busy = tokio::spawn(async move {
+            let permit = session_agent(&state_for_busy, "busy").await.unwrap();
+            let agent = permit.agent();
+            let _guard = agent.lock().await;
+            let _ = release_rx.await;
+            drop(_guard);
+            permit.release().await;
+            agent
+        });
+        let busy_agent = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(slot) = state.sessions.lock().await.get("busy") {
+                    if slot.users > 0 {
+                        return Arc::clone(&slot.agent);
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("busy session");
+
+        for index in 0..MAX_SESSIONS - 1 {
+            session_agent(&state, &format!("idle{index}"))
+                .await
+                .unwrap()
+                .release()
+                .await;
+        }
+        session_agent(&state, "newest").await.unwrap().release().await;
+        {
+            let sessions = state.sessions.lock().await;
+            assert!(sessions.contains_key("busy"));
+            assert_eq!(sessions.len(), MAX_SESSIONS);
+        }
+        let again = session_agent(&state, "busy").await.unwrap();
+        assert!(Arc::ptr_eq(&again.agent(), &busy_agent));
+        again.release().await;
+
+        let mut held = Vec::new();
+        for index in 0..MAX_SESSIONS {
+            let id = format!("hold{index}");
+            if state.sessions.lock().await.contains_key(&id) {
+                continue;
+            }
+            match session_agent(&state, &id).await {
+                Ok(permit) => held.push(permit),
+                Err(SessionError::Capacity) => break,
+                Err(SessionError::Internal(error)) => panic!("{error}"),
+            }
+        }
+        let overflow = session_agent(&state, "overflow").await;
+        assert!(matches!(overflow, Err(SessionError::Capacity)));
+        drop(held);
+        release_tx.send(()).unwrap();
+        let _ = busy.await.unwrap();
     }
 
     #[tokio::test]

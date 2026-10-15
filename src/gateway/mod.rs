@@ -65,10 +65,13 @@ pub(crate) fn cors_layer_for(origins: Option<&[String]>) -> CorsLayer {
 pub struct SessionSlot {
     pub agent: Arc<Mutex<Agent>>,
     pub last_used: Instant,
+    pub users: usize,
 }
 
 pub struct GatewayState {
     pub sessions: Arc<Mutex<HashMap<String, SessionSlot>>>,
+    pub loading: Arc<Mutex<std::collections::HashSet<String>>>,
+    pub session_ready: Arc<tokio::sync::Notify>,
     pub config: Config,
     pub memory: Option<Arc<SqliteMemory>>,
 }
@@ -77,6 +80,8 @@ impl Clone for GatewayState {
     fn clone(&self) -> Self {
         Self {
             sessions: Arc::clone(&self.sessions),
+            loading: Arc::clone(&self.loading),
+            session_ready: Arc::clone(&self.session_ready),
             config: self.config.clone(),
             memory: self.memory.clone(),
         }
@@ -183,6 +188,8 @@ pub async fn run(host: &str, port: u16, config_path: &PathBuf) -> Result<()> {
 
     let state = GatewayState {
         sessions: Arc::new(Mutex::new(HashMap::new())),
+        loading: Arc::new(Mutex::new(std::collections::HashSet::new())),
+        session_ready: Arc::new(tokio::sync::Notify::new()),
         config: config.clone(),
         memory: Some(Arc::new(memory)),
     };
@@ -250,6 +257,8 @@ mod tests {
     fn protected_app(config: Config, max_requests: usize) -> Router {
         let state = GatewayState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            loading: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            session_ready: Arc::new(tokio::sync::Notify::new()),
             config,
             memory: None,
         };
