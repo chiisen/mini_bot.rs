@@ -324,7 +324,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::gateway::GatewayState;
-    use crate::memory::SqliteMemory;
+    use crate::memory::{Memory, SqliteMemory};
     use std::collections::HashMap;
     use std::time::Duration;
 
@@ -486,6 +486,46 @@ mod tests {
         drop(held);
         release_tx.send(()).unwrap();
         let _ = busy.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn slow_sqlite_does_not_block_another_session_lookup() {
+        let dir = tempfile::tempdir().unwrap();
+        let memory = Arc::new(SqliteMemory::new(dir.path().join("memory.db")).unwrap());
+        let state = state_with_memory(Arc::clone(&memory));
+        session_agent(&state, "ready")
+            .await
+            .unwrap()
+            .release()
+            .await;
+        memory.set_blocking_delay(Duration::from_millis(300));
+        let store = {
+            let memory = Arc::clone(&memory);
+            tokio::spawn(async move {
+                memory
+                    .store(&crate::memory::MemoryEntry {
+                        id: "slow-row".to_string(),
+                        category: "session".to_string(),
+                        key: "slow".to_string(),
+                        content: "stored".to_string(),
+                        created_at: 1,
+                        updated_at: 1,
+                    })
+                    .await
+                    .unwrap();
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let started = Instant::now();
+        let permit = session_agent(&state, "ready").await.unwrap();
+        let elapsed = started.elapsed();
+        permit.release().await;
+        assert!(
+            elapsed < Duration::from_millis(100),
+            "session lookup took {elapsed:?}"
+        );
+        store.await.unwrap();
+        memory.set_blocking_delay(Duration::ZERO);
     }
 
     #[tokio::test]
