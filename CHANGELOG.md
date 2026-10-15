@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent 整合 Config 中的 security.allowed_commands
 
 ### Changed
+- Agent 的同一次 chat 用 `max_execution_time_secs` 限制 Provider、工具與歷史寫入。逾時回錯誤，CLI 與 Gateway 都不會把逾時當成成功
 - Shell 同時讀取 stdout 與 stderr，合計緩衝上限 64KB。超過、逾時或 future 取消時終止並回收直接子行程。衍生行程不在回收範圍
 - Session 持久化鍵改為 `cli_` 或 `gw_` 加上完整 ID，不再刪字或截斷。不合法 ID 的 webhook 回 HTTP 400。舊的 `sess_cli` 只還原到 CLI，其他合法舊鍵還原到 Gateway 後改存新鍵
 - Gateway 啟動時帶上 `ConnectInfo`，實際連線的 `/health` 不再因讀不到客戶端位址而回 HTTP 500

@@ -152,21 +152,14 @@ impl Agent {
 
     pub async fn chat(&mut self, user_input: &str) -> Result<String> {
         let max_time = Duration::from_secs(self.config.agent.max_execution_time_secs);
-        self.start_time = Some(Instant::now());
+        let started = Instant::now();
+        let deadline = started + max_time;
+        self.start_time = Some(started);
 
         self.history.add_message(Message {
             role: "user".to_string(),
             content: user_input.to_string(),
         });
-
-        if let Some(start) = self.start_time {
-            if start.elapsed() > max_time {
-                return Err(anyhow::anyhow!(
-                    "{}",
-                    tr_with_args("agent.max_time_exceeded", &[&max_time.as_secs()])
-                ));
-            }
-        }
 
         let max_iterations = self.config.agent.max_tool_iterations;
         let mut tool_iterations = 0;
@@ -178,23 +171,18 @@ impl Agent {
                     tr_with_args("agent.max_iterations_exceeded", &[&max_iterations])
                 ));
             }
+            ensure_deadline(deadline, max_time)?;
 
-            if let Some(start) = self.start_time {
-                if start.elapsed() > max_time {
-                    return Err(anyhow::anyhow!(
-                        "{}",
-                        tr_with_args("agent.max_time_exceeded", &[&max_time.as_secs()])
-                    ));
-                }
-            }
-
-            let response = self
-                .provider
-                .chat(
-                    self.history.for_provider(),
-                    Some(self.tool_definitions.clone()),
-                )
-                .await?;
+            let response = await_deadline(deadline, max_time, async {
+                self.provider
+                    .chat(
+                        self.history.for_provider(),
+                        Some(self.tool_definitions.clone()),
+                    )
+                    .await
+            })
+            .await?
+            .map_err(anyhow::Error::msg)?;
 
             self.history.add_message(response.message.clone());
 
@@ -202,9 +190,8 @@ impl Agent {
                 tool_iterations += 1;
 
                 for tool_call in &response.tool_calls {
-                    let result = self
-                        .execute_tool(tool_call)
-                        .await
+                    let result = await_deadline(deadline, max_time, self.execute_tool(tool_call))
+                        .await?
                         .map_err(anyhow::Error::msg)?;
 
                     let body = if result.success {
@@ -222,7 +209,7 @@ impl Agent {
                     });
                 }
             } else {
-                self.save_history().await?;
+                await_deadline(deadline, max_time, self.save_history()).await??;
                 return Ok(response.message.content);
             }
         }
@@ -393,6 +380,140 @@ mod tests {
         assert!(error.to_string().contains('1'));
     }
 
+    #[derive(Debug)]
+    struct TextAfterDelay {
+        delay: Duration,
+    }
+
+    #[async_trait]
+    impl Provider for TextAfterDelay {
+        fn name(&self) -> &str {
+            "text-after-delay"
+        }
+
+        async fn chat(
+            &self,
+            _messages: Vec<Message>,
+            _tools: Option<Vec<serde_json::Value>>,
+        ) -> Result<Response, ProviderError> {
+            tokio::time::sleep(self.delay).await;
+            Ok(Response {
+                message: Message {
+                    role: "assistant".to_string(),
+                    content: "late-text".to_string(),
+                },
+                tool_calls: Vec::new(),
+            })
+        }
+
+        async fn health_check(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn slow_final_text_is_not_a_successful_reply() {
+        let mut config = Config::default();
+        config.agent.max_execution_time_secs = 1;
+        let mut agent = Agent::new(config).unwrap();
+        agent.set_provider(Arc::new(TextAfterDelay {
+            delay: Duration::from_millis(1500),
+        }));
+        let error = agent.chat("hi").await.unwrap_err();
+        assert!(error.to_string().contains('1'));
+        assert!(agent
+            .history_snapshot()
+            .iter()
+            .all(|message| message.content != "late-text"));
+    }
+
+    #[tokio::test]
+    async fn a_batch_of_tools_stops_when_one_exceeds_the_deadline() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("sleep.pl");
+        let pid_path = dir.path().join("pid");
+        std::fs::write(
+            &script,
+            r#"open my $f, ">", $ARGV[0]; print $f $$; close $f; sleep 30;"#,
+        )
+        .unwrap();
+        let mut config = Config::default();
+        config.agent.max_execution_time_secs = 1;
+        config.security.allowed_commands = vec!["echo".to_string(), "perl".to_string()];
+        let mut agent = Agent::new(config).unwrap();
+        let arguments = serde_json::json!({
+            "command": format!("perl {} {}", script.display(), pid_path.display())
+        })
+        .to_string();
+        agent.set_provider(Arc::new(BatchProvider {
+            arguments,
+        }));
+        let started = Instant::now();
+        let error = agent.chat("go").await.unwrap_err();
+        assert!(error.to_string().contains('1'));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let pid: u32 = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Ok(text) = std::fs::read_to_string(&pid_path) {
+                    if let Ok(pid) = text.trim().parse::<u32>() {
+                        return pid;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("pid");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let alive = std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        assert!(!alive);
+    }
+
+    #[derive(Debug)]
+    struct BatchProvider {
+        arguments: String,
+    }
+
+    #[async_trait]
+    impl Provider for BatchProvider {
+        fn name(&self) -> &str {
+            "batch"
+        }
+
+        async fn chat(
+            &self,
+            _messages: Vec<Message>,
+            _tools: Option<Vec<serde_json::Value>>,
+        ) -> Result<Response, ProviderError> {
+            Ok(Response {
+                message: Message {
+                    role: "assistant".to_string(),
+                    content: "calling".to_string(),
+                },
+                tool_calls: vec![
+                    ToolCall {
+                        name: "shell".to_string(),
+                        arguments: r#"{"command":"echo first"}"#.to_string(),
+                    },
+                    ToolCall {
+                        name: "shell".to_string(),
+                        arguments: self.arguments.clone(),
+                    },
+                ],
+            })
+        }
+
+        async fn health_check(&self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+    }
+
     async fn save_text(memory: &Arc<SqliteMemory>, kind: SessionKind, id: &str, text: &str) {
         let mut agent = Agent::new(Config::default()).unwrap();
         agent.bind_session(Arc::clone(memory), kind, id.to_string());
@@ -506,6 +627,36 @@ mod tests {
             .history_snapshot()
             .iter()
             .any(|message| message.content == "old-cli"));
+    }
+}
+
+fn deadline_error(max_time: Duration) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{}",
+        tr_with_args("agent.max_time_exceeded", &[&max_time.as_secs()])
+    )
+}
+
+fn ensure_deadline(deadline: Instant, max_time: Duration) -> Result<()> {
+    if Instant::now() >= deadline {
+        Err(deadline_error(max_time))
+    } else {
+        Ok(())
+    }
+}
+
+async fn await_deadline<T>(
+    deadline: Instant,
+    max_time: Duration,
+    fut: impl std::future::Future<Output = T>,
+) -> Result<T> {
+    let left = deadline.saturating_duration_since(Instant::now());
+    if left.is_zero() {
+        return Err(deadline_error(max_time));
+    }
+    match tokio::time::timeout(left, fut).await {
+        Ok(value) => Ok(value),
+        Err(_) => Err(deadline_error(max_time)),
     }
 }
 
