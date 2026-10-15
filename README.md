@@ -27,7 +27,7 @@ mini_bot.rs config    # 查看合併後的有效設定，或寫出範例
 
 ### 核心工具集
 
-- **Shell Tool** - 只執行白名單中的程式名稱與參數，不透過 `sh -c`。單引號與雙引號內的空白會保留。含有分號、管線、重新導向、命令替換或換行的命令會拒絕。`allowed_commands` 為空時拒絕所有命令。
+- **Shell Tool** - 只執行白名單中的程式名稱與參數，不透過 `sh -c`。單引號與雙引號內的空白會保留。含有分號、管線、重新導向、命令替換或換行的命令會拒絕。`allowed_commands` 為空時拒絕所有命令。stdout 與 stderr 合計最多 64KB，超過、逾時或外層取消時會終止這個直接子行程。它再拉起的行程不在回收範圍。
 - **File Tool** - 檔案讀寫。`workspace_only = true` 時路徑必須在允許根目錄內；未設定 `allowed_roots` 時使用目前工作目錄。`workspace_only = false` 時不限制根目錄。
 - **Web Fetch Tool** - 只抓取 `http` 與 `https` 的文字內容。不允許網址內的帳密，也不允許 localhost、私有網段、link-local 與 loopback。轉址會逐一檢查，不會跟著進到這些位址。預設逾時 10 秒、回應上限 1MB、最多 3 次轉址。
 

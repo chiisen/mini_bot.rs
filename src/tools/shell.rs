@@ -1,10 +1,13 @@
 use super::traits::{Tool, ToolArgument, ToolDefinition, ToolResult};
 use async_trait::async_trait;
+use std::process::Stdio;
 use std::time::Duration;
-use tokio::process::Command as AsyncCommand;
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::process::{Child, Command as AsyncCommand};
 use tokio::time::timeout;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
+const MAX_SHELL_OUTPUT_BYTES: usize = 64 * 1024;
 
 #[derive(Debug)]
 pub struct ShellTool {
@@ -162,17 +165,43 @@ impl Tool for ShellTool {
         let program = argv[0].clone();
         let argv_rest = argv[1..].to_vec();
 
-        let result = timeout(timeout_duration, async move {
-            AsyncCommand::new(program).args(argv_rest).output().await
-        })
-        .await;
+        let mut command = AsyncCommand::new(program);
+        command
+            .args(argv_rest)
+            .kill_on_drop(true)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        // 子行程獨立 process group。回收只終止這個直接子行程；它再拉起的行程不在此列。
+        #[cfg(unix)]
+        command.process_group(0);
 
-        match result {
-            Ok(Ok(output)) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!("Command execution failed: {error}")),
+                });
+            }
+        };
+        let mut child = ChildGuard { child: Some(child) };
 
-                if output.status.success() {
+        match timeout(
+            timeout_duration,
+            collect_output(child.child_mut(), MAX_SHELL_OUTPUT_BYTES),
+        )
+        .await
+        {
+            Ok(Ok(Collected::Finished {
+                status,
+                stdout,
+                stderr,
+            })) => {
+                child.disarm();
+                let stdout = String::from_utf8_lossy(&stdout).to_string();
+                let stderr = String::from_utf8_lossy(&stderr).to_string();
+                if status.success() {
                     Ok(ToolResult {
                         success: true,
                         output: stdout,
@@ -190,21 +219,148 @@ impl Tool for ShellTool {
                     })
                 }
             }
-            Ok(Err(e)) => Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(format!("Command execution failed: {}", e)),
-            }),
-            Err(_) => Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(format!(
-                    "Command timed out after {} seconds",
-                    self.timeout_secs
-                )),
-            }),
+            Ok(Ok(Collected::Capped { stdout })) => {
+                child.disarm();
+                Ok(ToolResult {
+                    success: false,
+                    output: String::from_utf8_lossy(&stdout).to_string(),
+                    error: Some(format!(
+                        "output exceeded {MAX_SHELL_OUTPUT_BYTES} bytes\n...[truncated]"
+                    )),
+                })
+            }
+            Ok(Err(error)) => {
+                child.kill_and_wait().await;
+                Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!("Command execution failed: {error}")),
+                })
+            }
+            Err(_) => {
+                child.kill_and_wait().await;
+                Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!(
+                        "Command timed out after {} seconds",
+                        self.timeout_secs
+                    )),
+                })
+            }
         }
     }
+}
+
+enum Collected {
+    Finished {
+        status: std::process::ExitStatus,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    },
+    Capped {
+        stdout: Vec<u8>,
+    },
+}
+
+struct ChildGuard {
+    child: Option<Child>,
+}
+
+impl ChildGuard {
+    fn child_mut(&mut self) -> &mut Child {
+        self.child.as_mut().expect("child still running")
+    }
+
+    fn disarm(&mut self) {
+        self.child = None;
+    }
+
+    async fn kill_and_wait(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill().await;
+        }
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.start_kill();
+            tokio::spawn(async move {
+                let _ = child.wait().await;
+            });
+        }
+    }
+}
+
+async fn collect_output(child: &mut Child, limit: usize) -> std::io::Result<Collected> {
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| std::io::Error::other("stdout missing"))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| std::io::Error::other("stderr missing"))?;
+    let mut out_buf = Vec::new();
+    let mut err_buf = Vec::new();
+    let mut left = limit;
+    let mut out_open = true;
+    let mut err_open = true;
+    let mut out_chunk = [0_u8; 8192];
+    let mut err_chunk = [0_u8; 8192];
+
+    while out_open || err_open {
+        if left == 0 {
+            let _ = child.kill().await;
+            return Ok(Collected::Capped { stdout: out_buf });
+        }
+        tokio::select! {
+            biased;
+            read = read_chunk(&mut stdout, &mut out_chunk), if out_open => {
+                match read {
+                    Ok(0) => out_open = false,
+                    Ok(n) => {
+                        let take = n.min(left);
+                        out_buf.extend_from_slice(&out_chunk[..take]);
+                        left -= take;
+                        if take < n {
+                            let _ = child.kill().await;
+                            return Ok(Collected::Capped { stdout: out_buf });
+                        }
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            read = read_chunk(&mut stderr, &mut err_chunk), if err_open => {
+                match read {
+                    Ok(0) => err_open = false,
+                    Ok(n) => {
+                        let take = n.min(left);
+                        err_buf.extend_from_slice(&err_chunk[..take]);
+                        left -= take;
+                        if take < n {
+                            let _ = child.kill().await;
+                            return Ok(Collected::Capped { stdout: out_buf });
+                        }
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+    }
+
+    let status = child.wait().await?;
+    Ok(Collected::Finished {
+        status,
+        stdout: out_buf,
+        stderr: err_buf,
+    })
+}
+
+async fn read_chunk<R: AsyncRead + Unpin>(reader: &mut R, chunk: &mut [u8]) -> std::io::Result<usize> {
+    reader.read(chunk).await
 }
 
 #[cfg(test)]
@@ -289,5 +445,125 @@ mod tests {
         let tool = ShellTool::new();
         let result = tool.execute(r#"{"other": "value"}"#).await;
         assert!(result.is_err());
+    }
+
+    fn perl_tool(timeout_secs: u64) -> ShellTool {
+        ShellTool::with_config(vec!["perl".to_string()], timeout_secs)
+    }
+
+    fn write_script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    fn process_alive(pid: u32) -> bool {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
+    #[tokio::test]
+    async fn shell_caps_stdout_and_kills_the_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_path = dir.path().join("pid");
+        let script = write_script(
+            dir.path(),
+            "out.pl",
+            r#"open my $f, ">", $ARGV[0]; print $f $$; close $f; print "x" x 200000; sleep 30;"#,
+        );
+        let tool = perl_tool(10);
+        let command = format!("perl {} {}", script.display(), pid_path.display());
+        let started = std::time::Instant::now();
+        let result = tool
+            .execute(&serde_json::json!({ "command": command }).to_string())
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("output exceeded"));
+        assert!(result.output.len() <= MAX_SHELL_OUTPUT_BYTES);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let pid: u32 = std::fs::read_to_string(&pid_path).unwrap().trim().parse().unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!process_alive(pid));
+    }
+
+    #[tokio::test]
+    async fn shell_caps_stderr_and_kills_the_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_path = dir.path().join("pid");
+        let script = write_script(
+            dir.path(),
+            "err.pl",
+            r#"open my $f, ">", $ARGV[0]; print $f $$; close $f; print STDERR "y" x 200000; sleep 30;"#,
+        );
+        let tool = perl_tool(10);
+        let command = format!("perl {} {}", script.display(), pid_path.display());
+        let result = tool
+            .execute(&serde_json::json!({ "command": command }).to_string())
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("output exceeded"));
+        let pid: u32 = std::fs::read_to_string(&pid_path).unwrap().trim().parse().unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!process_alive(pid));
+    }
+
+    #[tokio::test]
+    async fn shell_timeout_kills_silent_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_path = dir.path().join("pid");
+        let script = write_script(
+            dir.path(),
+            "sleep.pl",
+            r#"open my $f, ">", $ARGV[0]; print $f $$; close $f; sleep 30;"#,
+        );
+        let tool = perl_tool(1);
+        let command = format!("perl {} {}", script.display(), pid_path.display());
+        let result = tool
+            .execute(&serde_json::json!({ "command": command }).to_string())
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("timed out"));
+        let pid: u32 = std::fs::read_to_string(&pid_path).unwrap().trim().parse().unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!process_alive(pid));
+    }
+
+    #[tokio::test]
+    async fn shell_cancel_kills_the_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_path = dir.path().join("pid");
+        let script = write_script(
+            dir.path(),
+            "sleep.pl",
+            r#"open my $f, ">", $ARGV[0]; print $f $$; close $f; sleep 60;"#,
+        );
+        let tool = perl_tool(30);
+        let command = format!("perl {} {}", script.display(), pid_path.display());
+        let args = serde_json::json!({ "command": command }).to_string();
+        let handle = tokio::spawn(async move { tool.execute(&args).await });
+        let pid = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Ok(text) = std::fs::read_to_string(&pid_path) {
+                    if let Ok(pid) = text.trim().parse::<u32>() {
+                        return pid;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("pid file");
+        handle.abort();
+        let _ = handle.await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!process_alive(pid));
     }
 }
